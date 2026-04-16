@@ -10,6 +10,9 @@ export default async function TimetablePage() {
 
   const school = await prisma.school.findUnique({ where: { id: schoolId } });
   const periodCount = school?.periodCount ?? 9;
+  const periodTimes: { start: string; end: string }[] = school?.periodTimes
+    ? JSON.parse(school.periodTimes)
+    : [];
 
   const data = await loadTimetableData();
 
@@ -22,6 +25,7 @@ export default async function TimetablePage() {
         <TimetablePageClient
           initialData={data}
           periodCount={periodCount}
+          periodTimes={periodTimes}
         />
       </div>
       <Toaster position="top-center" richColors />

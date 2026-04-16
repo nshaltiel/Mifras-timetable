@@ -41,6 +41,7 @@ interface TimetableGridProps {
   filterClassId?: string;
   filterTeacherId?: string;
   substitutionOverlays?: SubstitutionOverlay[];
+  periodTimes?: { start: string; end: string }[];
   // For edit dialog
   teachers?: TeacherInfo[];
   subjects?: SubjectInfo[];
@@ -57,6 +58,7 @@ export function TimetableGrid({
   viewMode = "by-class",
   filterClassId,
   substitutionOverlays = [],
+  periodTimes = [],
   teachers = [],
   subjects = [],
   rooms = [],
@@ -108,6 +110,12 @@ export function TimetableGrid({
   const days = Array.from({ length: dayCount }, (_, i) => i);
   const periods = Array.from({ length: periodCount }, (_, i) => i);
 
+  function getPeriodLabel(i: number) {
+    const t = periodTimes[i];
+    if (t?.start) return t.start;
+    return PERIOD_LABELS[i];
+  }
+
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       {/* Edit dialog — only rendered when editing */}
@@ -120,6 +128,7 @@ export function TimetableGrid({
           studyGroups={studyGroups}
           periodCount={periodCount}
           dayCount={dayCount}
+          periodTimes={periodTimes}
           defaultClassId={editingSlot.classId}
           defaultDay={editingSlot.day}
           defaultPeriod={editingSlot.period}
@@ -153,7 +162,7 @@ export function TimetableGrid({
               periods.map((period) => (
                 <tr key={period}>
                   <td className="border border-border bg-muted/30 p-1 text-center text-xs text-muted-foreground font-medium sticky end-0 z-10">
-                    {PERIOD_LABELS[period]}
+                    {getPeriodLabel(period)}
                   </td>
                   {days.map((day) => {
                     const key = `${day}-${period}-${filterClassId}`;

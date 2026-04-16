@@ -32,6 +32,7 @@ interface AddLessonDialogProps {
   studyGroups: StudyGroup[];
   periodCount: number;
   dayCount?: number;
+  periodTimes?: { start: string; end: string }[];
   defaultClassId?: string;
   defaultDay?: number;
   defaultPeriod?: number;
@@ -48,6 +49,7 @@ export function AddLessonDialog({
   studyGroups,
   periodCount,
   dayCount = 6,
+  periodTimes = [],
   defaultClassId,
   defaultDay,
   defaultPeriod,
@@ -192,9 +194,11 @@ export function AddLessonDialog({
                 onChange={(e) => setPeriod(Number(e.target.value))}
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
               >
-                {Array.from({ length: periodCount }, (_, i) => (
-                  <option key={i} value={i}>{PERIOD_LABELS[i]}</option>
-                ))}
+                {Array.from({ length: periodCount }, (_, i) => {
+                  const t = periodTimes[i];
+                  const label = t?.start ? t.start : PERIOD_LABELS[i];
+                  return <option key={i} value={i}>{label}</option>;
+                })}
               </select>
             </div>
           </div>

@@ -108,6 +108,7 @@ interface TimetableClientProps {
   constraints: { teacherId: string; type: string; day: number | null; period: number | null }[];
   studyGroups: StudyGroup[];
   periodCount: number;
+  periodTimes?: { start: string; end: string }[];
   selectedClassId: string | null;
   onClassChange: (classId: string) => void;
 }
@@ -121,6 +122,7 @@ export function TimetableClient({
   constraints,
   studyGroups,
   periodCount,
+  periodTimes,
   selectedClassId,
   onClassChange,
 }: TimetableClientProps) {
@@ -258,6 +260,7 @@ export function TimetableClient({
                 subjects={subjects}
                 studyGroups={studyGroups}
                 periodCount={periodCount}
+                periodTimes={periodTimes}
                 defaultClassId={selectedClassId ?? undefined}
               />
               <Button
@@ -295,6 +298,7 @@ export function TimetableClient({
           rooms={rooms}
           classes={classes}
           studyGroups={studyGroups}
+          periodTimes={periodTimes}
         />
       </div>
     </div>

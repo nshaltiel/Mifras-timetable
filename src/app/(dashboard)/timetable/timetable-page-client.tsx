@@ -25,9 +25,10 @@ interface TimetablePageClientProps {
     studyGroups: StudyGroup[];
   };
   periodCount: number;
+  periodTimes?: { start: string; end: string }[];
 }
 
-export function TimetablePageClient({ initialData, periodCount }: TimetablePageClientProps) {
+export function TimetablePageClient({ initialData, periodCount, periodTimes }: TimetablePageClientProps) {
   const [selectedClassId, setSelectedClassId] = useState<string | null>(
     initialData.classes[0]?.id ?? null
   );
@@ -42,6 +43,7 @@ export function TimetablePageClient({ initialData, periodCount }: TimetablePageC
       constraints={initialData.constraints}
       studyGroups={initialData.studyGroups}
       periodCount={periodCount}
+      periodTimes={periodTimes}
       selectedClassId={selectedClassId}
       onClassChange={(id) => setSelectedClassId(id || null)}
     />
