@@ -397,19 +397,48 @@ function ClassesTab({ classes, teachers }: { classes: Class[]; teachers: Teacher
   );
 }
 
+const GRADE_PRESETS = [
+  { value: "", label: "בחר שכבה..." },
+  { value: "1", label: "א׳" }, { value: "2", label: "ב׳" }, { value: "3", label: "ג׳" },
+  { value: "4", label: "ד׳" }, { value: "5", label: "ה׳" }, { value: "6", label: "ו׳" },
+  { value: "7", label: "ז׳" }, { value: "8", label: "ח׳" }, { value: "9", label: "ט׳" },
+  { value: "10", label: "י׳" }, { value: "11", label: "י״א" }, { value: "12", label: "י״ב" },
+  { value: "other", label: "אחר (הזן ידנית)" },
+];
+
 function ClassFields({ teachers, defaultValues }: { teachers: Teacher[]; defaultValues?: { name: string; grade: string; studentCount: string; homeroomTeacherId: string } }) {
+  const defaultGrade = defaultValues?.grade ?? "";
+  const isCustom = defaultGrade !== "" && !GRADE_PRESETS.some(p => p.value === defaultGrade && p.value !== "" && p.value !== "other");
+  const [selectValue, setSelectValue] = useState(isCustom ? "other" : defaultGrade);
+  const [customGrade, setCustomGrade] = useState(isCustom ? defaultGrade : "");
+
   return (
     <>
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1"><Label>שם כיתה</Label><Input name="name" defaultValue={defaultValues?.name} required /></div>
         <div className="space-y-1">
           <Label>שכבה</Label>
-          <select name="grade" defaultValue={defaultValues?.grade || "7"} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-            {[7,8,9,10,11,12].map(g => <option key={g} value={g}>{GRADE_HE[g] || g}</option>)}
+          <select
+            value={selectValue}
+            onChange={(e) => { setSelectValue(e.target.value); setCustomGrade(""); }}
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+          >
+            {GRADE_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
           </select>
+          {selectValue === "other" && (
+            <Input
+              placeholder="מספר שכבה (1-12)"
+              type="number" min={1} max={12} dir="ltr"
+              value={customGrade}
+              onChange={(e) => setCustomGrade(e.target.value)}
+              autoFocus
+            />
+          )}
+          {/* Hidden input carries the resolved grade value */}
+          <input type="hidden" name="grade" value={selectValue === "other" ? customGrade : selectValue} />
         </div>
       </div>
-      <div className="space-y-1"><Label>מספר תלמידים</Label><Input name="studentCount" type="number" min={0} dir="ltr" defaultValue={defaultValues?.studentCount || "30"} /></div>
+      <div className="space-y-1"><Label>מספר תלמידים</Label><Input name="studentCount" type="number" min={0} dir="ltr" defaultValue={defaultValues?.studentCount || "0"} /></div>
       <div className="space-y-1">
         <Label>מחנך/ת כיתה</Label>
         <select name="homeroomTeacherId" defaultValue={defaultValues?.homeroomTeacherId || ""} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
