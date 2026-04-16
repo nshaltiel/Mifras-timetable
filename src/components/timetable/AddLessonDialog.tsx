@@ -196,7 +196,7 @@ export function AddLessonDialog({
               >
                 {Array.from({ length: periodCount }, (_, i) => {
                   const t = periodTimes[i];
-                  const label = t?.start ? t.start : PERIOD_LABELS[i];
+                  const label = t?.start && t?.end ? `${t.start}–${t.end}` : t?.start ? t.start : PERIOD_LABELS[i];
                   return <option key={i} value={i}>{label}</option>;
                 })}
               </select>

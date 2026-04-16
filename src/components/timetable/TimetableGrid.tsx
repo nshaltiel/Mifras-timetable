@@ -112,6 +112,7 @@ export function TimetableGrid({
 
   function getPeriodLabel(i: number) {
     const t = periodTimes[i];
+    if (t?.start && t?.end) return `${t.start}–${t.end}`;
     if (t?.start) return t.start;
     return PERIOD_LABELS[i];
   }
