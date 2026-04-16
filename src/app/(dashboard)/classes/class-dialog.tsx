@@ -8,7 +8,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Plus, Pencil } from "lucide-react";
-import { GRADE_HE } from "@/lib/constants";
+
+// Common grade presets — user can also type any value manually
+const GRADE_PRESETS = [
+  { value: "", label: "בחר שכבה..." },
+  { value: "1", label: "א׳" },
+  { value: "2", label: "ב׳" },
+  { value: "3", label: "ג׳" },
+  { value: "4", label: "ד׳" },
+  { value: "5", label: "ה׳" },
+  { value: "6", label: "ו׳" },
+  { value: "7", label: "ז׳" },
+  { value: "8", label: "ח׳" },
+  { value: "9", label: "ט׳" },
+  { value: "10", label: "י׳" },
+  { value: "11", label: "י״א" },
+  { value: "12", label: "י״ב" },
+  { value: "other", label: "אחר (הזן ידנית)" },
+];
 
 interface ClassDialogProps {
   teachers: { id: string; name: string }[];
@@ -33,12 +50,23 @@ export function ClassDialog({
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
+  // Determine if the existing grade value is in the presets
+  const defaultGrade = defaultValues?.grade ?? "";
+  const isCustomGrade = defaultGrade !== "" && !GRADE_PRESETS.some(p => p.value === defaultGrade && p.value !== "" && p.value !== "other");
+  const [selectValue, setSelectValue] = useState(isCustomGrade ? "other" : defaultGrade);
+  const [customGrade, setCustomGrade] = useState(isCustomGrade ? defaultGrade : "");
+
   function handleSubmit(formData: FormData) {
+    // Inject the resolved grade value
+    const grade = selectValue === "other" ? customGrade : selectValue;
+    formData.set("grade", grade);
     startTransition(async () => {
       await action(formData);
       setOpen(false);
     });
   }
+
+  const showCustomInput = selectValue === "other";
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -63,14 +91,27 @@ export function ClassDialog({
               <Label htmlFor="grade">שכבה</Label>
               <select
                 id="grade"
-                name="grade"
-                defaultValue={defaultValues?.grade || "7"}
+                value={selectValue}
+                onChange={(e) => { setSelectValue(e.target.value); setCustomGrade(""); }}
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
               >
-                {Object.entries(GRADE_HE).map(([val, label]) => (
-                  <option key={val} value={val}>{label}</option>
+                {GRADE_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
                 ))}
               </select>
+              {showCustomInput && (
+                <Input
+                  placeholder="הזן מספר שכבה (1-12)"
+                  type="number"
+                  min={1}
+                  max={12}
+                  dir="ltr"
+                  value={customGrade}
+                  onChange={(e) => setCustomGrade(e.target.value)}
+                  required
+                  autoFocus
+                />
+              )}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -101,7 +142,10 @@ export function ClassDialog({
             </div>
           </div>
           <div className="flex gap-2 justify-start">
-            <Button type="submit" disabled={isPending}>
+            <Button
+              type="submit"
+              disabled={isPending || !selectValue || (showCustomInput && !customGrade)}
+            >
               {isPending ? "שומר..." : "שמירה"}
             </Button>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>ביטול</Button>

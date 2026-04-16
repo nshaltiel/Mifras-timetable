@@ -45,6 +45,12 @@ export const SUBJECT_CATEGORY_HE: Record<string, string> = {
 };
 
 export const GRADE_HE: Record<number, string> = {
+  1: "א'",
+  2: "ב'",
+  3: "ג'",
+  4: "ד'",
+  5: "ה'",
+  6: "ו'",
   7: "ז'",
   8: "ח'",
   9: "ט'",
