@@ -3,7 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ──────────────────────────────────────
@@ -13,9 +14,12 @@ datasource db {
 model School {
   id               String   @id @default(cuid())
   name             String
+  principalName    String?
+  principalPhone   String?
   periodCount      Int      @default(10)
   dayCount         Int      @default(6)
-  periodStartTimes String?  // JSON: ["07:45","08:30",...]
+  periodStartTimes String?  // JSON: ["07:45","08:30",...] (legacy)
+  periodTimes      String?  // JSON: [{"start":"07:45","end":"08:30"},...]
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -40,13 +44,16 @@ model User {
 }
 
 model Teacher {
-  id              String  @id @default(cuid())
-  name            String
-  email           String?
-  phone           String?
-  maxHoursPerWeek Int?
-  schoolId        String
-  school          School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  id                  String  @id @default(cuid())
+  name                String
+  email               String?
+  phone               String?
+  gender              String  @default("UNSPECIFIED") // MALE | FEMALE | UNSPECIFIED
+  maxHoursPerWeek     Int?
+  considerationPercent Int    @default(0) // 0-100 deducted from maxHoursPerWeek
+  personalSituation   String? // optional free text
+  schoolId            String
+  school              School  @relation(fields: [schoolId], references: [id], onDelete: Cascade)
 
   subjects      TeacherSubject[]
   slots         TimetableSlot[]
@@ -211,7 +218,7 @@ model Absence {
   teacherId String
   teacher   Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
   date      String
-  periods   String  // JSON: [0,1,2]
+  periods   String
   reason    String
   note      String?
   status    String  @default("UNRESOLVED")
@@ -222,6 +229,14 @@ model Absence {
   updatedAt DateTime @updatedAt
 
   @@unique([teacherId, date])
+}
+
+model SuperAdmin {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  createdAt DateTime @default(now())
 }
 
 model Substitution {
@@ -239,4 +254,18 @@ model Substitution {
   notes               String?
 
   createdAt DateTime @default(now())
+}
+
+model MifrasPage {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  content     String   @default("")
+  parentId    String?
+  parent      MifrasPage?  @relation("SubPages", fields: [parentId], references: [id], onDelete: SetNull)
+  children    MifrasPage[] @relation("SubPages")
+  order       Int      @default(0)
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
