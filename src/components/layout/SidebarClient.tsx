@@ -44,7 +44,7 @@ export function SidebarClient({ mifrasPages }: SidebarClientProps) {
         <img
           src="/mifras-logo.png"
           alt="מפרש"
-          className="h-9 w-auto object-contain"
+          className="h-18 w-auto object-contain"
           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
       </div>
