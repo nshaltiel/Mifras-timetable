@@ -20,7 +20,7 @@ export default async function TimetablePage() {
     <>
       <div className="flex flex-col h-[calc(100vh-3.5rem-3rem)] gap-0">
         <div className="mb-4">
-          <h2 className="text-2xl font-bold">מערכת שעות</h2>
+          <h2 className="text-2xl font-bold">מערכת שעות — v2</h2>
         </div>
         <TimetablePageClient
           initialData={data}
