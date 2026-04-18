@@ -15,7 +15,7 @@ import { Plus, Pencil } from "lucide-react";
 
 interface TeacherDialogProps {
   subjects: { id: string; name: string }[];
-  action: (data: FormData) => Promise<void>;
+  action: (data: FormData) => Promise<unknown>;
   title: string;
   defaultValues?: {
     name: string;

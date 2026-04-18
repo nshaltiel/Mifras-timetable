@@ -27,7 +27,14 @@ export async function createTeacher(data: FormData) {
     personalSituation: data.get("personalSituation") || undefined,
   });
 
-  await prisma.teacher.create({
+  // Parse constraints from form data
+  const constraintsRaw = data.get("constraints");
+  type ConstraintCell = { day: number; period: number; type: string };
+  const constraintCells: ConstraintCell[] = constraintsRaw
+    ? (JSON.parse(constraintsRaw as string) as ConstraintCell[])
+    : [];
+
+  const teacher = await prisma.teacher.create({
     data: {
       name: parsed.name,
       email: parsed.email || null,
@@ -43,7 +50,20 @@ export async function createTeacher(data: FormData) {
     },
   });
 
+  if (constraintCells.length > 0) {
+    await prisma.teacherConstraint.createMany({
+      data: constraintCells.map((c) => ({
+        teacherId: teacher.id,
+        type: c.type,
+        day: c.day,
+        period: c.period,
+      })),
+    });
+  }
+
   revalidatePath("/settings");
+  revalidatePath("/timetable");
+  return { id: teacher.id };
 }
 
 export async function updateTeacher(id: string, data: FormData) {
@@ -59,24 +79,45 @@ export async function updateTeacher(id: string, data: FormData) {
     personalSituation: data.get("personalSituation") || undefined,
   });
 
-  await prisma.teacher.update({
-    where: { id, schoolId },
-    data: {
-      name: parsed.name,
-      email: parsed.email || null,
-      phone: parsed.phone || null,
-      gender: parsed.gender,
-      maxHoursPerWeek: parsed.maxHoursPerWeek ? Number(parsed.maxHoursPerWeek) : null,
-      considerationPercent: parsed.considerationPercent ? Number(parsed.considerationPercent) : 0,
-      personalSituation: parsed.personalSituation || null,
-      subjects: {
-        deleteMany: {},
-        create: subjectIds.map((sid) => ({ subjectId: sid })),
+  // Parse constraints from form data
+  const constraintsRaw = data.get("constraints");
+  type ConstraintCell = { day: number; period: number; type: string };
+  const constraintCells: ConstraintCell[] = constraintsRaw
+    ? (JSON.parse(constraintsRaw as string) as ConstraintCell[])
+    : [];
+
+  await prisma.$transaction([
+    prisma.teacher.update({
+      where: { id, schoolId },
+      data: {
+        name: parsed.name,
+        email: parsed.email || null,
+        phone: parsed.phone || null,
+        gender: parsed.gender,
+        maxHoursPerWeek: parsed.maxHoursPerWeek ? Number(parsed.maxHoursPerWeek) : null,
+        considerationPercent: parsed.considerationPercent ? Number(parsed.considerationPercent) : 0,
+        personalSituation: parsed.personalSituation || null,
+        subjects: {
+          deleteMany: {},
+          create: subjectIds.map((sid) => ({ subjectId: sid })),
+        },
       },
-    },
-  });
+    }),
+    prisma.teacherConstraint.deleteMany({ where: { teacherId: id } }),
+    ...(constraintCells.length > 0
+      ? [prisma.teacherConstraint.createMany({
+          data: constraintCells.map((c) => ({
+            teacherId: id,
+            type: c.type,
+            day: c.day,
+            period: c.period,
+          })),
+        })]
+      : []),
+  ]);
 
   revalidatePath("/settings");
+  revalidatePath("/timetable");
 }
 
 export async function deleteTeacher(id: string) {

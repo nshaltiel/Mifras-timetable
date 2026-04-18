@@ -13,6 +13,8 @@ import { Plus } from "lucide-react";
 import { useTimetableStore } from "@/stores/timetable-store";
 import { DAYS_HE, PERIOD_LABELS } from "@/lib/constants";
 import type { TimetableSlot } from "@/stores/timetable-store";
+import { isTeacherFree } from "@/engine/availability";
+import { CONSTRAINT } from "@/lib/constraint-types";
 
 type StudyGroup = {
   id: string;
@@ -30,6 +32,7 @@ interface AddLessonDialogProps {
   rooms: { id: string; name: string; capacity: number }[];
   subjects: { id: string; name: string; color: string | null }[];
   studyGroups: StudyGroup[];
+  teacherConstraints?: { teacherId: string; type: string; day: number | null; period: number | null }[];
   periodCount: number;
   dayCount?: number;
   periodTimes?: { start: string; end: string }[];
@@ -47,6 +50,7 @@ export function AddLessonDialog({
   rooms,
   subjects,
   studyGroups,
+  teacherConstraints = [],
   periodCount,
   dayCount = 6,
   periodTimes = [],
@@ -72,18 +76,43 @@ export function AddLessonDialog({
 
   const { addSlot, removeSlot, slots } = useTimetableStore();
 
+  // Slots excluding the one currently being edited (for conflict checks)
+  const otherSlots = slots.filter(
+    (s: TimetableSlot) =>
+      !(editingSlot && s.day === editingSlot.day && s.period === editingSlot.period && s.classId === editingSlot.classId)
+  );
+
   // Rooms already occupied at the selected day+period
   const occupiedRoomIds = new Set(
-    slots
+    otherSlots
       .filter((s: TimetableSlot) => s.day === day && s.period === period && s.roomId)
       .map((s: TimetableSlot) => s.roomId as string)
   );
-  const availableRooms = rooms.filter((r) => !occupiedRoomIds.has(r.id));
+  // Show all rooms but mark occupied ones
+  const allRoomsWithStatus = rooms.map((r) => ({
+    room: r,
+    occupied: occupiedRoomIds.has(r.id),
+  }));
+  // Keep backward-compat variable for capacity warning logic
+  const availableRooms = rooms;
+
+  // Teacher availability at selected day+period
+  const hardConstraints = teacherConstraints.filter((c) => c.type === CONSTRAINT.UNAVAILABLE);
+  const teacherOptionsForSubject = subjectId
+    ? teachers.filter((t) => t.subjects.some((ts) => ts.subject.id === subjectId))
+    : teachers;
+  const teacherOptionsWithStatus = teacherOptionsForSubject.map((t) => {
+    const free = isTeacherFree(t.id, day, period, otherSlots, hardConstraints.map((c) => ({ ...c, day: c.day ?? undefined, period: c.period ?? undefined })));
+    const booked = otherSlots.some((s: TimetableSlot) => s.teacherId === t.id && s.day === day && s.period === period);
+    const blocked = hardConstraints.some((c) => c.teacherId === t.id && (c.day == null || c.day === day) && (c.period == null || c.period === period));
+    const reason = booked ? " — משובץ כבר" : blocked ? " — אילוץ" : "";
+    return { t, free, reason };
+  });
 
   const selectedClass = classes.find((c) => c.id === classId);
   const selectedTeacher = teachers.find((t) => t.id === teacherId);
   const selectedSubject = subjects.find((s) => s.id === subjectId);
-  const selectedRoom = availableRooms.find((r) => r.id === roomId);
+  const selectedRoom = availableRooms.find((r: { id: string; name: string; capacity: number }) => r.id === roomId);
 
   // Study groups for the selected subject (filtered by class if selected)
   const relevantStudyGroups = subjectId
@@ -99,6 +128,17 @@ export function AddLessonDialog({
     selectedRoom &&
     selectedRoom.capacity > 0 &&
     selectedRoom.capacity < selectedClass.studentCount;
+
+  // Soft constraint hint for selected teacher
+  const softHint = teacherId
+    ? teacherConstraints.find(
+        (c) =>
+          c.teacherId === teacherId &&
+          (c.day == null || c.day === day) &&
+          (c.period == null || c.period === period) &&
+          (c.type === CONSTRAINT.AVOID || c.type === CONSTRAINT.PREFER)
+      )
+    : null;
 
   // Teacher hours warning: count current slots in store
   const teacherCurrentSlots = teacherId
@@ -264,17 +304,21 @@ export function AddLessonDialog({
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
             >
               <option value="">בחר מורה</option>
-              {(subjectId
-                ? teachers.filter((t) =>
-                    t.subjects.some((ts) => ts.subject.id === subjectId)
-                  )
-                : teachers
-              ).map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
+              {teacherOptionsWithStatus.map(({ t, free, reason }) => (
+                <option key={t.id} value={t.id} disabled={!free}>
+                  {t.name}{reason}
+                </option>
               ))}
             </select>
             {selectedTeacher && subjectId && !selectedTeacher.subjects.some((ts) => ts.subject.id === subjectId) && (
               <p className="text-xs text-amber-600">המורה לא מלמד/ת מקצוע זה בדרך כלל</p>
+            )}
+            {softHint && (
+              <p className={`text-xs ${softHint.type === CONSTRAINT.AVOID ? "text-amber-600" : "text-green-600"}`}>
+                {softHint.type === CONSTRAINT.AVOID
+                  ? "⚠️ המורה מעדיפ/ה לא ללמד בשעה זו"
+                  : "✓ שעה מועדפת למורה"}
+              </p>
             )}
             {selectedTeacher && teacherMax != null && (
               <p className={`text-xs ${teacherOverloaded ? "text-destructive" : teacherNearMax ? "text-amber-600" : "text-muted-foreground"}`}>
@@ -302,16 +346,17 @@ export function AddLessonDialog({
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
             >
               <option value="">ללא חדר</option>
-              {availableRooms.map((r) => {
+              {allRoomsWithStatus.map(({ room: r, occupied }) => {
                 const tooSmall =
                   selectedClass &&
                   r.capacity > 0 &&
                   r.capacity < selectedClass.studentCount;
                 return (
-                  <option key={r.id} value={r.id}>
+                  <option key={r.id} value={r.id} disabled={occupied}>
                     {r.name}
                     {r.capacity > 0 ? ` (קיבולת ${r.capacity})` : ""}
                     {tooSmall ? " ⚠️" : ""}
+                    {occupied ? " — תפוס" : ""}
                   </option>
                 );
               })}

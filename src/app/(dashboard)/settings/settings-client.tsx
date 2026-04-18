@@ -34,6 +34,8 @@ import {
 import { createStudyGroup, deleteStudyGroup } from "@/lib/study-group-actions";
 import { addSchoolUser, removeSchoolUser, updateSchoolName, resetUserPasswordByAdmin, changeOwnPassword } from "@/lib/user-actions";
 import { ROOM_TYPE_HE, SUBJECT_CATEGORY_HE, GRADE_HE } from "@/lib/constants";
+import { TeacherConstraintGrid } from "@/components/settings/TeacherConstraintGrid";
+import { type ConstraintType } from "@/lib/constraint-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +47,7 @@ type Teacher = {
   personalSituation: string | null;
   subjects: { id: string; subject: { id: string; name: string } }[];
   homeroomClass: { id: string; name: string } | null;
+  constraints: { type: string; day: number | null; period: number | null }[];
   _count: { slots: number };
 };
 type Class = {
@@ -82,7 +85,7 @@ function CrudDialog({
 }: {
   title: string;
   trigger: React.ReactNode;
-  onSave: (fd: FormData) => Promise<void>;
+  onSave: (fd: FormData) => Promise<unknown>;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -125,7 +128,7 @@ function CrudDialog({
 
 // ─── Teachers Tab ─────────────────────────────────────────────────────────────
 
-function TeacherRow({ teacher: t, onDelete, subjects }: { teacher: Teacher; onDelete: (id: string) => Promise<void>; subjects: Subject[] }) {
+function TeacherRow({ teacher: t, onDelete, subjects, dayCount, periodCount }: { teacher: Teacher; onDelete: (id: string) => Promise<void>; subjects: Subject[]; dayCount: number; periodCount: number }) {
   const assigned = t._count.slots;
   const max = t.maxHoursPerWeek;
   const effectiveMax = max != null ? Math.floor(max * (1 - (t.considerationPercent || 0) / 100)) : null;
@@ -166,7 +169,7 @@ function TeacherRow({ teacher: t, onDelete, subjects }: { teacher: Teacher; onDe
           <CrudDialog title="עריכת מורה" trigger={
             <Button variant="ghost" size="icon"><Pencil className="h-4 w-4" /></Button>
           } onSave={(fd) => updateTeacher(t.id, fd)}>
-            <TeacherFields subjects={subjects} defaultValues={{ name: t.name, email: t.email || "", phone: t.phone || "", gender: t.gender || "UNSPECIFIED", maxHoursPerWeek: t.maxHoursPerWeek?.toString() || "", considerationPercent: t.considerationPercent?.toString() || "0", personalSituation: t.personalSituation || "", subjectIds: t.subjects.map(ts => ts.subject.id) }} />
+            <TeacherFields subjects={subjects} dayCount={dayCount} periodCount={periodCount} defaultValues={{ name: t.name, email: t.email || "", phone: t.phone || "", gender: t.gender || "UNSPECIFIED", maxHoursPerWeek: t.maxHoursPerWeek?.toString() || "", considerationPercent: t.considerationPercent?.toString() || "0", personalSituation: t.personalSituation || "", subjectIds: t.subjects.map(ts => ts.subject.id), constraints: t.constraints }} />
           </CrudDialog>
           <DeleteButton action={() => onDelete(t.id)} entityName={t.name} />
         </div>
@@ -175,7 +178,7 @@ function TeacherRow({ teacher: t, onDelete, subjects }: { teacher: Teacher; onDe
   );
 }
 
-function TeachersTab({ teachers, subjects }: { teachers: Teacher[]; subjects: Subject[] }) {
+function TeachersTab({ teachers, subjects, dayCount, periodCount }: { teachers: Teacher[]; subjects: Subject[]; dayCount: number; periodCount: number }) {
   const router = useRouter();
   const [isImporting, startImportTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -243,7 +246,7 @@ function TeachersTab({ teachers, subjects }: { teachers: Teacher[]; subjects: Su
         <CrudDialog title="הוספת מורה" trigger={
           <Button size="sm" className="gap-2"><Plus className="h-4 w-4" />הוספת מורה</Button>
         } onSave={createTeacher}>
-          <TeacherFields subjects={subjects} />
+          <TeacherFields subjects={subjects} dayCount={dayCount} periodCount={periodCount} />
         </CrudDialog>
       </div>
       <div className="rounded-lg border overflow-hidden">
@@ -264,7 +267,7 @@ function TeachersTab({ teachers, subjects }: { teachers: Teacher[]; subjects: Su
             {teachers.length === 0 ? (
               <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">אין מורים</TableCell></TableRow>
             ) : teachers.map((t) => (
-              <TeacherRow key={t.id} teacher={t} onDelete={handleDelete} subjects={subjects} />
+              <TeacherRow key={t.id} teacher={t} onDelete={handleDelete} subjects={subjects} dayCount={dayCount} periodCount={periodCount} />
             ))}
           </TableBody>
         </Table>
@@ -273,11 +276,29 @@ function TeachersTab({ teachers, subjects }: { teachers: Teacher[]; subjects: Su
   );
 }
 
-function TeacherFields({ defaultValues, subjects }: {
+function TeacherFields({ defaultValues, subjects, dayCount, periodCount }: {
   subjects: Subject[];
-  defaultValues?: { name: string; email: string; phone: string; gender: string; maxHoursPerWeek: string; considerationPercent: string; personalSituation: string; subjectIds?: string[] };
+  dayCount: number;
+  periodCount: number;
+  defaultValues?: { name: string; email: string; phone: string; gender: string; maxHoursPerWeek: string; considerationPercent: string; personalSituation: string; subjectIds?: string[]; constraints?: { type: string; day: number | null; period: number | null }[] };
 }) {
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<string[]>(defaultValues?.subjectIds ?? []);
+
+  // Build constraint record from initial values
+  const initialConstraints: Record<string, ConstraintType> = {};
+  for (const c of defaultValues?.constraints ?? []) {
+    if (c.day != null && c.period != null) {
+      initialConstraints[`${c.day}-${c.period}`] = c.type as ConstraintType;
+    }
+  }
+  const [constraints, setConstraints] = useState<Record<string, ConstraintType>>(initialConstraints);
+  const [showConstraints, setShowConstraints] = useState(Object.keys(initialConstraints).length > 0);
+
+  // Serialize constraints for form submission
+  const constraintCells = Object.entries(constraints).map(([key, type]) => {
+    const [day, period] = key.split("-").map(Number);
+    return { day, period, type };
+  });
 
   function toggleSubject(id: string) {
     setSelectedSubjectIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -335,6 +356,34 @@ function TeacherFields({ defaultValues, subjects }: {
         <Label>מצב אישי (אופציונלי)</Label>
         <textarea name="personalSituation" defaultValue={defaultValues?.personalSituation} placeholder="למשל: ילדים קטנים, בן זוג במילואים, גר רחוק..." className="flex min-h-[64px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm resize-none" />
       </div>
+      {/* Constraints section */}
+      <div className="border rounded-md overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setShowConstraints(v => !v)}
+          className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium bg-muted/30 hover:bg-muted/50 transition-colors"
+        >
+          <span>
+            אילוצים והעדפות
+            {constraintCells.length > 0 && (
+              <span className="ms-2 text-xs text-primary">({constraintCells.length} תאים מסומנים)</span>
+            )}
+          </span>
+          <span className="text-muted-foreground text-xs">{showConstraints ? "▲" : "▼"}</span>
+        </button>
+        {showConstraints && (
+          <div className="p-3">
+            <TeacherConstraintGrid
+              dayCount={dayCount}
+              periodCount={periodCount}
+              value={constraints}
+              onChange={setConstraints}
+            />
+          </div>
+        )}
+      </div>
+      {/* Serialize constraints as hidden JSON input */}
+      <input type="hidden" name="constraints" value={JSON.stringify(constraintCells)} />
     </>
   );
 }
@@ -1068,7 +1117,7 @@ export function SettingsClient({ teachers, classes, rooms, subjects, studyGroups
 
       {/* Tab content */}
       <div>
-        {activeTab === "teachers" && <TeachersTab teachers={teachers} subjects={subjects} />}
+        {activeTab === "teachers" && <TeachersTab teachers={teachers} subjects={subjects} dayCount={school?.dayCount ?? 6} periodCount={school?.periodCount ?? 9} />}
         {activeTab === "classes" && <ClassesTab classes={classes} teachers={teachers} />}
         {activeTab === "rooms" && <RoomsTab rooms={rooms} />}
         {activeTab === "subjects" && <SubjectsTab subjects={subjects} />}

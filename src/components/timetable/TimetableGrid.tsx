@@ -48,6 +48,7 @@ interface TimetableGridProps {
   rooms?: RoomInfo[];
   classes?: ClassInfo[];
   studyGroups?: StudyGroupInfo[];
+  teacherConstraints?: { teacherId: string; type: string; day: number | null; period: number | null }[];
 }
 
 export function TimetableGrid({
@@ -64,6 +65,7 @@ export function TimetableGrid({
   rooms = [],
   classes = [],
   studyGroups = [],
+  teacherConstraints = [],
 }: TimetableGridProps) {
   const { slots, pendingConflicts, moveSlot, removeSlot } = useTimetableStore();
   const [activeSlot, setActiveSlot] = useState<TimetableSlot | null>(null);
@@ -127,6 +129,7 @@ export function TimetableGrid({
           rooms={rooms}
           subjects={subjects}
           studyGroups={studyGroups}
+          teacherConstraints={teacherConstraints}
           periodCount={periodCount}
           dayCount={dayCount}
           periodTimes={periodTimes}

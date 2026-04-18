@@ -12,6 +12,7 @@ export default async function SettingsPage() {
       include: {
         subjects: { include: { subject: { select: { id: true, name: true } } } },
         homeroomClass: { select: { id: true, name: true } },
+        constraints: { select: { type: true, day: true, period: true } },
         _count: { select: { slots: true } },
       },
       orderBy: { name: "asc" },

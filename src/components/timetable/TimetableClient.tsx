@@ -259,6 +259,7 @@ export function TimetableClient({
                 rooms={rooms}
                 subjects={subjects}
                 studyGroups={studyGroups}
+                teacherConstraints={constraints}
                 periodCount={periodCount}
                 periodTimes={periodTimes}
                 defaultClassId={selectedClassId ?? undefined}
@@ -298,6 +299,7 @@ export function TimetableClient({
           rooms={rooms}
           classes={classes}
           studyGroups={studyGroups}
+          teacherConstraints={constraints}
           periodTimes={periodTimes}
         />
       </div>
