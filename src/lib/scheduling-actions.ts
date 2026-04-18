@@ -109,7 +109,7 @@ export async function autoScheduleClass(
     // All teachers who teach this subject
     const subjectTeachers = teachers
       .filter((t) => t.subjects.some((ts) => ts.subjectId === req.subjectId))
-      .map((t) => ({ id: t.id, name: t.name }));
+      .map((t) => ({ id: t.id, name: t.name, maxHoursPerWeek: t.maxHoursPerWeek ?? null }));
 
     // Put study-group teacher first if available
     let candidateTeachers = subjectTeachers;

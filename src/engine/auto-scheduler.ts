@@ -28,7 +28,7 @@ export interface Requirement {
   subjectColor: string;
   hoursPerWeek: number;
   /** Candidate teachers for this subject (for this class). First = preferred. */
-  candidateTeachers: { id: string; name: string }[];
+  candidateTeachers: { id: string; name: string; maxHoursPerWeek?: number | null }[];
   studyGroupId: string | null;
   /** If true, this subject must not be placed adjacent to another lesson of itself on the same day. */
   noConsecutive?: boolean;
@@ -201,7 +201,23 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
   const placed: SchedulerSlot[] = [];
   const unplaced: SchedulerOutput["unplaced"] = [];
 
+  // Pre-count existing hours per teacher across the whole school schedule
+  const teacherHoursUsed = new Map<string, number>();
+  for (const s of input.existingSlots) {
+    teacherHoursUsed.set(s.teacherId, (teacherHoursUsed.get(s.teacherId) ?? 0) + 1);
+  }
+
   for (const req of requirements) {
+    // Quick check: no candidate teachers at all
+    if (req.candidateTeachers.length === 0) {
+      unplaced.push({
+        subjectName: req.subjectName,
+        remaining: req.hoursPerWeek,
+        reason: "אין מורים מוגדרים למקצוע זה",
+      });
+      continue;
+    }
+
     let remaining = req.hoursPerWeek;
 
     for (let attempt = 0; attempt < req.hoursPerWeek; attempt++) {
@@ -220,10 +236,26 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
         }
       }
 
+      // No free slots for this class at all
+      if (candidates.length === 0) {
+        unplaced.push({
+          subjectName: req.subjectName,
+          remaining: req.hoursPerWeek - attempt,
+          reason: "כל חריצי הזמן תפוסים לכיתה",
+        });
+        break;
+      }
+
       // Sort by score
       candidates.sort((a, b) => a.score - b.score);
 
       let placed_this = false;
+      // Track the most specific failure reason encountered across all candidate slots
+      let failPriority = 0;
+      let failReason = "לא נמצא חריץ זמין";
+      const bump = (priority: number, reason: string) => {
+        if (priority > failPriority) { failPriority = priority; failReason = reason; }
+      };
 
       for (const cand of candidates) {
         // No-consecutive check: skip if this subject already has an adjacent lesson today
@@ -231,23 +263,43 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
           const placedSameSubjectToday = placed
             .filter((p) => p.subjectId === req.subjectId && p.day === cand.day)
             .map((p) => p.period);
-          if (placedSameSubjectToday.some((p) => Math.abs(p - cand.period) <= 1)) continue;
+          if (placedSameSubjectToday.some((p) => Math.abs(p - cand.period) <= 1)) {
+            bump(3, "אילוץ אי-רציפות מונע השלמת השיבוץ");
+            continue;
+          }
         }
 
-        // Find a teacher
+        // Find an available teacher
         let chosenTeacher: { id: string; name: string } | null = null;
+
         for (const teacher of req.candidateTeachers) {
-          if (isTeacherUnavailable(teacher.id, cand.day, cand.period, constraints)) continue;
-          if (isTeacherBooked(teacher.id, cand.day, cand.period, slots)) continue;
+          // Check weekly hour cap
+          const hoursUsed = teacherHoursUsed.get(teacher.id) ?? 0;
+          if (teacher.maxHoursPerWeek != null && hoursUsed >= teacher.maxHoursPerWeek) {
+            const msg = req.candidateTeachers.length === 1
+              ? `${teacher.name} הגיע/ה למכסת שעות שבועית (${teacher.maxHoursPerWeek} שע׳)`
+              : "מורי המקצוע הגיעו למכסת שעות שבועית";
+            bump(5, msg);
+            continue;
+          }
+          if (isTeacherUnavailable(teacher.id, cand.day, cand.period, constraints)) {
+            bump(2, "המורה חסום/ה לפי אילוצי זמינות");
+            continue;
+          }
+          if (isTeacherBooked(teacher.id, cand.day, cand.period, slots)) {
+            bump(1, "כל המורים תפוסים בשעות האפשריות");
+            continue;
+          }
           chosenTeacher = teacher;
           break;
         }
+
         if (!chosenTeacher) continue;
 
-        // Find a room
+        // Find a room (optional — placed without room if none available)
         const room = findRoom(classStudentCount, cand.day, cand.period, slots, rooms);
 
-        // Add slot
+        // Commit the slot
         const newSlot: ExistingSlot = {
           day: cand.day,
           period: cand.period,
@@ -256,6 +308,9 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
           roomId: room?.id ?? null,
         };
         slots.push(newSlot);
+
+        // Increment teacher's used hours so subsequent placements respect the cap
+        teacherHoursUsed.set(chosenTeacher.id, (teacherHoursUsed.get(chosenTeacher.id) ?? 0) + 1);
 
         placed.push({
           day: cand.day,
@@ -278,17 +333,16 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
       }
 
       if (!placed_this) {
-        // Could not place this lesson
         unplaced.push({
           subjectName: req.subjectName,
           remaining: req.hoursPerWeek - attempt,
-          reason: "לא נמצא חריץ זמין (מורה / חדר / חלון)",
+          reason: failReason,
         });
         break;
       }
     }
 
-    // If we couldn't place all hours, note it
+    // If we couldn't place all hours, note it (shouldn't normally reach here, but as a safety net)
     if (remaining > 0) {
       const alreadyNoted = unplaced.find((u) => u.subjectName === req.subjectName);
       if (!alreadyNoted) {
