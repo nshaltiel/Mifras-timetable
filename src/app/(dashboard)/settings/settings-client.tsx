@@ -54,7 +54,7 @@ type Class = {
   id: string; name: string; grade: number; studentCount: number;
   homeroomTeacher: { id: string; name: string } | null;
 };
-type Room = { id: string; name: string; capacity: number; type: string };
+type Room = { id: string; name: string; capacity: number; type: string; maxConcurrentClasses: number };
 type Subject = {
   id: string; name: string; category: string | null; color: string | null;
   _count: { teachers: number };
@@ -111,11 +111,11 @@ function CrudDialog({
         {trigger}
       </span>
       <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         <form action={handleSubmit} className="space-y-4">
           {children}
-          <div className="flex gap-2">
+          <div className="flex gap-2 sticky bottom-0 bg-background pt-2 pb-1">
             <Button type="submit" disabled={isPending}>{isPending ? "שומר..." : "שמירה"}</Button>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>ביטול</Button>
           </div>
@@ -533,7 +533,12 @@ function RoomsTab({ rooms }: { rooms: Room[] }) {
               <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">אין חדרים</TableCell></TableRow>
             ) : rooms.map((r) => (
               <TableRow key={r.id}>
-                <TableCell className="font-medium">{r.name}</TableCell>
+                <TableCell className="font-medium">
+                  {r.name}
+                  {r.maxConcurrentClasses > 1 && (
+                    <span className="ms-1 text-xs text-primary">×{r.maxConcurrentClasses}</span>
+                  )}
+                </TableCell>
                 <TableCell><Badge variant="secondary">{ROOM_TYPE_HE[r.type] || r.type}</Badge></TableCell>
                 <TableCell className="text-sm">{r.capacity}</TableCell>
                 <TableCell>
@@ -541,7 +546,7 @@ function RoomsTab({ rooms }: { rooms: Room[] }) {
                     <CrudDialog title="עריכת חדר" trigger={
                       <Button variant="ghost" size="icon"><Pencil className="h-4 w-4" /></Button>
                     } onSave={(fd) => updateRoom(r.id, fd)}>
-                      <RoomFields defaultValues={{ name: r.name, capacity: r.capacity.toString(), type: r.type }} />
+                      <RoomFields defaultValues={{ name: r.name, capacity: r.capacity.toString(), type: r.type, maxConcurrentClasses: r.maxConcurrentClasses.toString() }} />
                     </CrudDialog>
                     <DeleteButton action={() => handleDelete(r.id)} entityName={r.name} />
                   </div>
@@ -555,18 +560,30 @@ function RoomsTab({ rooms }: { rooms: Room[] }) {
   );
 }
 
-function RoomFields({ defaultValues }: { defaultValues?: { name: string; capacity: string; type: string } }) {
+function RoomFields({ defaultValues }: { defaultValues?: { name: string; capacity: string; type: string; maxConcurrentClasses?: string } }) {
   return (
     <>
       <div className="space-y-1"><Label>שם חדר</Label><Input name="name" defaultValue={defaultValues?.name} required /></div>
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1"><Label>קיבולת</Label><Input name="capacity" type="number" min={1} dir="ltr" defaultValue={defaultValues?.capacity || "35"} /></div>
+        <div className="space-y-1"><Label>קיבולת תלמידים</Label><Input name="capacity" type="number" min={0} dir="ltr" defaultValue={defaultValues?.capacity || "35"} /></div>
         <div className="space-y-1">
           <Label>סוג</Label>
           <select name="type" defaultValue={defaultValues?.type || "REGULAR"} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
             {Object.entries(ROOM_TYPE_HE).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         </div>
+      </div>
+      <div className="space-y-1">
+        <Label>מקסימום כיתות בו-זמנית</Label>
+        <Input
+          name="maxConcurrentClasses"
+          type="number"
+          min={1}
+          max={10}
+          dir="ltr"
+          defaultValue={defaultValues?.maxConcurrentClasses || "1"}
+        />
+        <p className="text-xs text-muted-foreground">לרוב הכיתות: 1. לאולם ספורט / ספרייה: 2 ומעלה.</p>
       </div>
     </>
   );

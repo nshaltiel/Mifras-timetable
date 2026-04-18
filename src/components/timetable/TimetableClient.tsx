@@ -7,6 +7,7 @@ import { AddLessonDialog } from "./AddLessonDialog";
 import { Button } from "@/components/ui/button";
 import { Undo2, Redo2, Save, AlertTriangle } from "lucide-react";
 import { saveTimetableBulk, loadSubstitutionsForDate } from "@/lib/timetable-actions";
+import { AutoScheduleDialog } from "./AutoScheduleDialog";
 import { toast } from "sonner";
 import type { TimetableSlot } from "@/stores/timetable-store";
 import { GRADE_HE } from "@/lib/constants";
@@ -253,6 +254,11 @@ export function TimetableClient({
           )}
           {!actualView && (
             <>
+              <AutoScheduleDialog
+                classes={classes}
+                subjects={subjects}
+                selectedClassId={selectedClassId}
+              />
               <AddLessonDialog
                 teachers={teachers}
                 classes={classes}

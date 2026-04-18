@@ -68,7 +68,9 @@ export function SlotCell({ day, period, classId, slot, conflicts, onRemove, onEd
         )} />
       )}
       {hasConflict && (
-        <div className="absolute top-0.5 left-0.5 w-2 h-2 rounded-full bg-destructive" title={conflicts[0].message} />
+        <div className="mt-0.5 rounded text-[10px] leading-tight px-1 py-0.5 bg-destructive/15 text-destructive font-medium line-clamp-2">
+          ⚠ {conflicts!.map((c) => c.message).join(" | ")}
+        </div>
       )}
       {substitution && (
         <div className="absolute bottom-0.5 inset-x-0.5 rounded text-[10px] leading-tight px-1 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 truncate">

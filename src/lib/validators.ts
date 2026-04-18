@@ -20,8 +20,9 @@ export const classSchema = z.object({
 
 export const roomSchema = z.object({
   name: z.string().min(1, "שם חדר נדרש"),
-  capacity: z.coerce.number().int().positive().default(40),
+  capacity: z.coerce.number().int().min(0).default(40),
   type: z.string().default("REGULAR"),
+  maxConcurrentClasses: z.coerce.number().int().min(1).default(1),
 });
 
 export const subjectSchema = z.object({

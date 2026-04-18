@@ -41,6 +41,22 @@ export interface TimetableState {
 
 const MAX_HISTORY = 50;
 
+/** Recompute all conflicts from scratch for a given slots array. */
+function recomputeAllConflicts(
+  slots: TimetableSlot[],
+  constraints: TeacherConstraintData[]
+): Record<string, Conflict[]> {
+  const map: Record<string, Conflict[]> = {};
+  for (const slot of slots) {
+    const others = slots.filter((s) => s !== slot);
+    const c = detectConflicts(slot, others, constraints);
+    if (c.length > 0) {
+      map[`${slot.day}-${slot.period}-${slot.classId}`] = c;
+    }
+  }
+  return map;
+}
+
 export const useTimetableStore = create<TimetableState>()(
   immer((set, get) => ({
     slots: [],
@@ -179,6 +195,7 @@ export const useTimetableStore = create<TimetableState>()(
         if (state.historyIndex > 0) {
           state.historyIndex--;
           state.slots = state.history[state.historyIndex];
+          state.pendingConflicts = recomputeAllConflicts(state.slots, state.teacherConstraints);
           state.isDirty = true;
         }
       });
@@ -189,6 +206,7 @@ export const useTimetableStore = create<TimetableState>()(
         if (state.historyIndex < state.history.length - 1) {
           state.historyIndex++;
           state.slots = state.history[state.historyIndex];
+          state.pendingConflicts = recomputeAllConflicts(state.slots, state.teacherConstraints);
           state.isDirty = true;
         }
       });

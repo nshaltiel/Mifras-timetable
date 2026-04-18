@@ -186,6 +186,7 @@ export async function createRoom(data: FormData) {
     name: data.get("name"),
     capacity: data.get("capacity"),
     type: data.get("type"),
+    maxConcurrentClasses: data.get("maxConcurrentClasses") || 1,
   });
 
   await prisma.room.create({
@@ -201,6 +202,7 @@ export async function updateRoom(id: string, data: FormData) {
     name: data.get("name"),
     capacity: data.get("capacity"),
     type: data.get("type"),
+    maxConcurrentClasses: data.get("maxConcurrentClasses") || 1,
   });
 
   await prisma.room.update({
