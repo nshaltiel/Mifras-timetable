@@ -3,9 +3,10 @@
 import { useState, useTransition, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Wand2, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
+import { Wand2, CheckCircle2, AlertTriangle, Loader2, ChevronDown } from "lucide-react";
 import { getClassRequirements, saveClassRequirements, autoScheduleClass } from "@/lib/scheduling-actions";
 import { useTimetableStore } from "@/stores/timetable-store";
+import { DAYS_HE, PERIOD_LABELS } from "@/lib/constants";
 import type { TimetableSlot } from "@/stores/timetable-store";
 
 type Subject = { id: string; name: string; color: string | null };
@@ -15,6 +16,9 @@ interface AutoScheduleDialogProps {
   classes: ClassInfo[];
   subjects: Subject[];
   selectedClassId?: string | null;
+  periodCount: number;
+  dayCount: number;
+  periodTimes?: { start: string; end: string }[];
 }
 
 type PlacedSlot = {
@@ -24,11 +28,23 @@ type PlacedSlot = {
   className: string; roomName?: string;
 };
 
-export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoScheduleDialogProps) {
+export function AutoScheduleDialog({
+  classes,
+  subjects,
+  selectedClassId,
+  periodCount,
+  dayCount,
+  periodTimes = [],
+}: AutoScheduleDialogProps) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"requirements" | "results">("requirements");
   const [classId, setClassId] = useState(selectedClassId ?? classes[0]?.id ?? "");
   const [requirements, setRequirements] = useState<Record<string, number>>({}); // subjectId -> hours
+  const [noConsecutiveIds, setNoConsecutiveIds] = useState<Set<string>>(new Set());
+  const [dayLastPeriods, setDayLastPeriods] = useState<number[]>(
+    Array.from({ length: dayCount }, () => periodCount - 1)
+  );
+  const [showDayLimits, setShowDayLimits] = useState(false);
   const [loadingReqs, setLoadingReqs] = useState(false);
   const [isSaving, startSaving] = useTransition();
   const [isScheduling, startScheduling] = useTransition();
@@ -37,7 +53,12 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
 
   const { addSlot, slots } = useTimetableStore();
 
-  // Load existing requirements when class changes
+  // Sync dayLastPeriods length if dayCount changes
+  useEffect(() => {
+    setDayLastPeriods(Array.from({ length: dayCount }, () => periodCount - 1));
+  }, [dayCount, periodCount]);
+
+  // Load existing requirements when class or dialog opens
   useEffect(() => {
     if (!classId || !open) return;
     setLoadingReqs(true);
@@ -55,12 +76,21 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
     setStep("requirements");
     setPlacedSlots([]);
     setUnplaced([]);
+    setNoConsecutiveIds(new Set());
     if (selectedClassId) setClassId(selectedClassId);
     setOpen(true);
   }
 
+  function toggleNoConsecutive(subjectId: string) {
+    setNoConsecutiveIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(subjectId)) next.delete(subjectId);
+      else next.add(subjectId);
+      return next;
+    });
+  }
+
   function handleSaveAndSchedule() {
-    // Save requirements first, then auto-schedule
     const reqs = Object.entries(requirements)
       .map(([subjectId, hoursPerWeek]) => ({ subjectId, hoursPerWeek }))
       .filter((r) => r.hoursPerWeek > 0);
@@ -70,11 +100,11 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
     });
 
     startScheduling(async () => {
-      await saveClassRequirements(classId, Object.entries(requirements)
-        .map(([subjectId, hoursPerWeek]) => ({ subjectId, hoursPerWeek }))
-        .filter((r) => r.hoursPerWeek > 0));
-
-      const result = await autoScheduleClass(classId);
+      await saveClassRequirements(classId, reqs);
+      const result = await autoScheduleClass(classId, {
+        dayLastPeriods,
+        noConsecutiveSubjectIds: [...noConsecutiveIds],
+      });
       setPlacedSlots(result.placed);
       setUnplaced(result.output.unplaced);
       setStep("results");
@@ -82,7 +112,6 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
   }
 
   function handleApply() {
-    // Add all placed slots to the store
     for (const s of placedSlots) {
       addSlot({
         day: s.day,
@@ -102,9 +131,16 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
     setOpen(false);
   }
 
+  function periodLabel(i: number) {
+    const t = periodTimes[i];
+    if (t?.end) return `${PERIOD_LABELS[i]} (עד ${t.end})`;
+    return PERIOD_LABELS[i];
+  }
+
   const selectedClass = classes.find((c) => c.id === classId);
   const existingSlotsForClass = slots.filter((s: TimetableSlot) => s.classId === classId).length;
   const totalHours = Object.values(requirements).reduce((a, b) => a + b, 0);
+  const days = Array.from({ length: dayCount }, (_, i) => i);
 
   return (
     <>
@@ -136,17 +172,18 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
             </select>
             {existingSlotsForClass > 0 && (
               <p className="text-xs text-amber-600">
-                ⚠️ לכיתה זו כבר מוצבים {existingSlotsForClass} שיעורים. השיבוץ האוטומטי יוסיף שיעורים נוספים מעליהם.
+                ⚠️ לכיתה זו כבר מוצבים {existingSlotsForClass} שיעורים. השיבוץ האוטומטי יוסיף שיעורים נוספים.
               </p>
             )}
           </div>
 
           {step === "requirements" && (
             <>
+              {/* Subject hours */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium">מקצועות ושעות שבועיות</label>
-                  <span className="text-xs text-muted-foreground">סה&quot;כ: {totalHours} שעות</span>
+                  <span className="text-xs text-muted-foreground">סה״כ: {totalHours} שעות</span>
                 </div>
 
                 {loadingReqs ? (
@@ -154,44 +191,105 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
                 ) : (
-                  <div className="border rounded-md divide-y max-h-72 overflow-y-auto">
-                    {subjects.map((subject) => (
-                      <div key={subject.id} className="flex items-center justify-between px-3 py-2 gap-3">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {subject.color && (
-                            <span
-                              className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: subject.color }}
-                            />
-                          )}
-                          <span className="text-sm truncate">{subject.name}</span>
+                  <div className="border rounded-md divide-y max-h-64 overflow-y-auto">
+                    {subjects.map((subject) => {
+                      const hours = requirements[subject.id] ?? 0;
+                      const isNoConsec = noConsecutiveIds.has(subject.id);
+                      return (
+                        <div key={subject.id} className="flex items-center justify-between px-3 py-2 gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {subject.color && (
+                              <span
+                                className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                style={{ backgroundColor: subject.color }}
+                              />
+                            )}
+                            <span className="text-sm truncate">{subject.name}</span>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {/* No-consecutive toggle — only when ≥2 hours */}
+                            {hours >= 2 && (
+                              <button
+                                type="button"
+                                onClick={() => toggleNoConsecutive(subject.id)}
+                                title={isNoConsec ? "ביטול מניעת שיעורים רצופים" : "מנע שיעורים רצופים"}
+                                className={`text-xs px-1.5 py-0.5 rounded border transition-colors ${
+                                  isNoConsec
+                                    ? "bg-amber-100 dark:bg-amber-900/40 border-amber-400 text-amber-700 dark:text-amber-300"
+                                    : "border-input text-muted-foreground hover:bg-muted"
+                                }`}
+                              >
+                                ≠≠
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setRequirements((prev) => ({
+                                ...prev,
+                                [subject.id]: Math.max(0, (prev[subject.id] ?? 0) - 1),
+                              }))}
+                              className="w-7 h-7 rounded border border-input hover:bg-muted flex items-center justify-center text-sm font-medium"
+                            >
+                              −
+                            </button>
+                            <span className="w-7 text-center text-sm font-medium tabular-nums">{hours}</span>
+                            <button
+                              type="button"
+                              onClick={() => setRequirements((prev) => ({
+                                ...prev,
+                                [subject.id]: (prev[subject.id] ?? 0) + 1,
+                              }))}
+                              className="w-7 h-7 rounded border border-input hover:bg-muted flex items-center justify-center text-sm font-medium"
+                            >
+                              +
+                            </button>
+                            <span className="text-xs text-muted-foreground w-8">שע׳</span>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => setRequirements((prev) => ({
-                              ...prev,
-                              [subject.id]: Math.max(0, (prev[subject.id] ?? 0) - 1),
-                            }))}
-                            className="w-7 h-7 rounded border border-input hover:bg-muted flex items-center justify-center text-sm font-medium"
-                          >
-                            −
-                          </button>
-                          <span className="w-8 text-center text-sm font-medium tabular-nums">
-                            {requirements[subject.id] ?? 0}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setRequirements((prev) => ({
-                              ...prev,
-                              [subject.id]: (prev[subject.id] ?? 0) + 1,
-                            }))}
-                            className="w-7 h-7 rounded border border-input hover:bg-muted flex items-center justify-center text-sm font-medium"
-                          >
-                            +
-                          </button>
-                          <span className="text-xs text-muted-foreground w-10">שע&apos;</span>
-                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {noConsecutiveIds.size > 0 && (
+                  <p className="text-xs text-amber-600">
+                    ≠≠ = ללא שיעורים רצופים ({[...noConsecutiveIds].map(id => subjects.find(s => s.id === id)?.name).join(", ")})
+                  </p>
+                )}
+              </div>
+
+              {/* Per-day end period */}
+              <div className="border rounded-md overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowDayLimits(v => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium bg-muted/30 hover:bg-muted/50 transition-colors"
+                >
+                  <span>שעות סיום לפי יום</span>
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${showDayLimits ? "rotate-180" : ""}`} />
+                </button>
+                {showDayLimits && (
+                  <div className="p-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {days.map((day) => (
+                      <div key={day} className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground w-14 flex-shrink-0">{DAYS_HE[day]}</span>
+                        <select
+                          value={dayLastPeriods[day]}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setDayLastPeriods((prev) => {
+                              const next = [...prev];
+                              next[day] = val;
+                              return next;
+                            });
+                          }}
+                          className="flex-1 h-8 rounded-md border border-input bg-transparent px-2 text-xs"
+                        >
+                          {Array.from({ length: periodCount }, (_, i) => (
+                            <option key={i} value={i}>
+                              {periodTimes[i]?.end ? `שע׳ ${i + 1} (עד ${periodTimes[i].end})` : `שיעור ${i + 1}`}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     ))}
                   </div>
@@ -218,7 +316,6 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
           {step === "results" && (
             <>
               <div className="space-y-3">
-                {/* Success count */}
                 <div className="flex items-center gap-2 text-green-700 bg-green-50 dark:bg-green-950/30 rounded-md px-3 py-2">
                   <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
                   <span className="text-sm font-medium">
@@ -227,7 +324,6 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
                   </span>
                 </div>
 
-                {/* Unplaced */}
                 {unplaced.length > 0 && (
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-destructive flex items-center gap-1">
@@ -245,22 +341,18 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
                   </div>
                 )}
 
-                {/* Preview of placed slots */}
                 {placedSlots.length > 0 && (
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-muted-foreground">תצוגה מקדימה ({placedSlots.length}):</p>
-                    <div className="border rounded-md divide-y max-h-48 overflow-y-auto text-sm">
+                    <div className="border rounded-md divide-y max-h-52 overflow-y-auto text-sm">
                       {[...placedSlots]
                         .sort((a, b) => a.day !== b.day ? a.day - b.day : a.period - b.period)
                         .map((s, i) => (
                           <div key={i} className="flex items-center gap-2 px-3 py-1.5">
-                            <span
-                              className="w-2 h-2 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: s.subjectColor }}
-                            />
+                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: s.subjectColor }} />
                             <span className="font-medium">{s.subjectName}</span>
                             <span className="text-muted-foreground text-xs">
-                              יום {s.day + 1}, שעה {s.period + 1} — {s.teacherName}
+                              {DAYS_HE[s.day]}, שיעור {s.period + 1} — {s.teacherName}
                               {s.roomName ? ` — ${s.roomName}` : ""}
                             </span>
                           </div>
@@ -277,9 +369,7 @@ export function AutoScheduleDialog({ classes, subjects, selectedClassId }: AutoS
                     החל שיבוץ
                   </Button>
                 )}
-                <Button variant="outline" onClick={() => setStep("requirements")}>
-                  חזרה להגדרות
-                </Button>
+                <Button variant="outline" onClick={() => setStep("requirements")}>חזרה</Button>
                 <Button variant="ghost" onClick={() => setOpen(false)}>סגור</Button>
               </div>
             </>

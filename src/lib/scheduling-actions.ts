@@ -53,7 +53,13 @@ export async function saveClassRequirements(
 
 // ─── Auto-schedule a class ────────────────────────────────────────────────────
 
-export async function autoScheduleClass(classId: string): Promise<{
+export async function autoScheduleClass(
+  classId: string,
+  options?: {
+    dayLastPeriods?: number[];
+    noConsecutiveSubjectIds?: string[];
+  }
+): Promise<{
   output: SchedulerOutput;
   placed: {
     day: number; period: number; classId: string; teacherId: string;
@@ -121,6 +127,7 @@ export async function autoScheduleClass(classId: string): Promise<{
       hoursPerWeek: req.hoursPerWeek,
       candidateTeachers,
       studyGroupId: sg?.id ?? null,
+      noConsecutive: options?.noConsecutiveSubjectIds?.includes(req.subjectId) ?? false,
     };
   });
 
@@ -150,6 +157,7 @@ export async function autoScheduleClass(classId: string): Promise<{
     })),
     dayCount,
     periodCount,
+    dayLastPeriods: options?.dayLastPeriods,
   });
 
   return { output, placed: output.placed };

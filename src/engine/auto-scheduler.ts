@@ -30,6 +30,8 @@ export interface Requirement {
   /** Candidate teachers for this subject (for this class). First = preferred. */
   candidateTeachers: { id: string; name: string }[];
   studyGroupId: string | null;
+  /** If true, this subject must not be placed adjacent to another lesson of itself on the same day. */
+  noConsecutive?: boolean;
 }
 
 export interface ExistingSlot {
@@ -64,6 +66,8 @@ export interface SchedulerInput {
   constraints: ConstraintEntry[];
   dayCount: number;
   periodCount: number;
+  /** Per-day last allowed period (0-based, inclusive). If omitted, all days use periodCount-1. */
+  dayLastPeriods?: number[];
 }
 
 export interface SchedulerOutput {
@@ -205,7 +209,8 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
       const candidates: SlotScore[] = [];
 
       for (let day = 0; day < dayCount; day++) {
-        for (let period = 0; period < periodCount; period++) {
+        const lastPeriod = input.dayLastPeriods?.[day] ?? periodCount - 1;
+        for (let period = 0; period <= lastPeriod; period++) {
           if (isClassBooked(classId, day, period, slots)) continue;
 
           const score = scoreSlot(day, period, classId, slots);
@@ -221,6 +226,14 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
       let placed_this = false;
 
       for (const cand of candidates) {
+        // No-consecutive check: skip if this subject already has an adjacent lesson today
+        if (req.noConsecutive) {
+          const placedSameSubjectToday = placed
+            .filter((p) => p.subjectId === req.subjectId && p.day === cand.day)
+            .map((p) => p.period);
+          if (placedSameSubjectToday.some((p) => Math.abs(p - cand.period) <= 1)) continue;
+        }
+
         // Find a teacher
         let chosenTeacher: { id: string; name: string } | null = null;
         for (const teacher of req.candidateTeachers) {
