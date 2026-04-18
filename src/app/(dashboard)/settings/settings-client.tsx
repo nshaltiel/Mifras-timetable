@@ -32,6 +32,7 @@ import {
   updateSchoolPeriodTimes, importTeachersFromExcel,
 } from "@/lib/actions";
 import { createStudyGroup, deleteStudyGroup } from "@/lib/study-group-actions";
+import { updateStudyGroup } from "@/lib/scheduling-actions";
 import { addSchoolUser, removeSchoolUser, updateSchoolName, resetUserPasswordByAdmin, changeOwnPassword } from "@/lib/user-actions";
 import { ROOM_TYPE_HE, SUBJECT_CATEGORY_HE, GRADE_HE } from "@/lib/constants";
 import { TeacherConstraintGrid } from "@/components/settings/TeacherConstraintGrid";
@@ -671,92 +672,144 @@ function SubjectFields({ defaultValues }: { defaultValues?: { name: string; cate
 
 // ─── Study Groups Tab ─────────────────────────────────────────────────────────
 
-function StudyGroupsTab({ studyGroups, teachers, classes, subjects }: {
-  studyGroups: StudyGroup[]; teachers: Teacher[]; classes: Class[]; subjects: Subject[];
+function StudyGroupDialog({
+  mode,
+  group,
+  teachers,
+  classes,
+  subjects,
+  onDone,
+}: {
+  mode: "create" | "edit";
+  group?: StudyGroup;
+  teachers: Teacher[];
+  classes: Class[];
+  subjects: Subject[];
+  onDone: () => void;
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const [name, setName] = useState("");
-  const [subjectId, setSubjectId] = useState("");
-  const [level, setLevel] = useState("רגיל");
-  const [teacherId, setTeacherId] = useState("");
-  const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
+  const [name, setName] = useState(group?.name ?? "");
+  const [subjectId, setSubjectId] = useState(group?.subject.id ?? "");
+  const [level, setLevel] = useState(group?.level ?? "רגיל");
+  const [teacherId, setTeacherId] = useState(group?.teacher.id ?? "");
+  const [selectedClassIds, setSelectedClassIds] = useState<string[]>(
+    group?.classes.map(({ class: c }) => c.id) ?? []
+  );
 
   function toggleClass(id: string) {
     setSelectedClassIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
 
-  function handleCreate() {
+  function handleSave() {
     if (!name || !subjectId || !teacherId || selectedClassIds.length === 0) return;
     startTransition(async () => {
       try {
-        await createStudyGroup({ name, subjectId, level, teacherId, classIds: selectedClassIds });
-        toast.success("קבוצת הלימוד נוצרה");
-        setOpen(false); setName(""); setSubjectId(""); setLevel("רגיל"); setTeacherId(""); setSelectedClassIds([]);
-        router.refresh();
+        if (mode === "edit" && group) {
+          await updateStudyGroup(group.id, { name, subjectId, level, teacherId, classIds: selectedClassIds });
+          toast.success("קבוצת הלימוד עודכנה");
+        } else {
+          await createStudyGroup({ name, subjectId, level, teacherId, classIds: selectedClassIds });
+          toast.success("קבוצת הלימוד נוצרה");
+        }
+        setOpen(false);
+        onDone();
       } catch { toast.error("שגיאה"); }
     });
   }
+
+  const filteredTeachers = subjectId
+    ? teachers.filter(t => t.subjects.some(ts => ts.subject.id === subjectId))
+    : teachers;
+
+  const trigger = mode === "edit"
+    ? <Button variant="ghost" size="icon"><Pencil className="h-4 w-4" /></Button>
+    : <Button size="sm" className="gap-2"><Plus className="h-4 w-4" />הוספת קבוצה</Button>;
+
+  return (
+    <>
+      <span onClick={() => {
+        // reset for create mode
+        if (mode === "create") { setName(""); setSubjectId(""); setLevel("רגיל"); setTeacherId(""); setSelectedClassIds([]); }
+        setOpen(true);
+      }} style={{ display: "contents" }}>{trigger}</span>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{mode === "edit" ? "עריכת קבוצת לימוד" : "יצירת קבוצת לימוד"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1"><Label>שם</Label><Input value={name} onChange={e => setName(e.target.value)} /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>מקצוע</Label>
+                <select value={subjectId} onChange={e => { setSubjectId(e.target.value); setTeacherId(""); }}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
+                  <option value="">בחר</option>
+                  {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <Label>רמה</Label>
+                <select value={level} onChange={e => setLevel(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
+                  {["רגיל","מגברת","מחוזקת","בסיסי"].map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>מורה</Label>
+              <select value={teacherId} onChange={e => setTeacherId(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
+                <option value="">בחר</option>
+                {filteredTeachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label>כיתות ({selectedClassIds.length} נבחרו)</Label>
+              <div className="border rounded-md p-2 max-h-32 overflow-y-auto">
+                <div className="flex flex-wrap gap-1">
+                  {classes.map(c => (
+                    <button key={c.id} type="button" onClick={() => toggleClass(c.id)}
+                      className={`px-2 py-0.5 rounded text-xs border transition-colors ${
+                        selectedClassIds.includes(c.id)
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "border-input hover:bg-muted"
+                      }`}>
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={handleSave}
+                disabled={!name || !subjectId || !teacherId || selectedClassIds.length === 0 || isPending}>
+                {isPending ? "שומר..." : mode === "edit" ? "שמור" : "צור"}
+              </Button>
+              <Button variant="outline" onClick={() => setOpen(false)}>ביטול</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function StudyGroupsTab({ studyGroups, teachers, classes, subjects }: {
+  studyGroups: StudyGroup[]; teachers: Teacher[]; classes: Class[]; subjects: Subject[];
+}) {
+  const router = useRouter();
 
   async function handleDelete(id: string) {
     await deleteStudyGroup(id);
     router.refresh();
   }
 
-  const filteredTeachers = subjectId ? teachers.filter(t => t.subjects.some(ts => ts.subject.id === subjectId)) : teachers;
-
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <Button size="sm" className="gap-2" onClick={() => setOpen(true)}><Plus className="h-4 w-4" />הוספת קבוצה</Button>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader><DialogTitle>יצירת קבוצת לימוד</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1"><Label>שם</Label><Input value={name} onChange={e => setName(e.target.value)} /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label>מקצוע</Label>
-                  <select value={subjectId} onChange={e => { setSubjectId(e.target.value); setTeacherId(""); }} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-                    <option value="">בחר</option>
-                    {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <Label>רמה</Label>
-                  <select value={level} onChange={e => setLevel(e.target.value)} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-                    {["רגיל","מגברת","מחוזקת","בסיסי"].map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label>מורה</Label>
-                <select value={teacherId} onChange={e => setTeacherId(e.target.value)} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm">
-                  <option value="">בחר</option>
-                  {filteredTeachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label>כיתות ({selectedClassIds.length} נבחרו)</Label>
-                <div className="border rounded-md p-2 max-h-32 overflow-y-auto">
-                  <div className="flex flex-wrap gap-1">
-                    {classes.map(c => (
-                      <button key={c.id} type="button" onClick={() => toggleClass(c.id)}
-                        className={`px-2 py-0.5 rounded text-xs border transition-colors ${selectedClassIds.includes(c.id) ? "bg-primary text-primary-foreground border-primary" : "border-input hover:bg-muted"}`}>
-                        {c.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={handleCreate} disabled={!name || !subjectId || !teacherId || selectedClassIds.length === 0 || isPending}>צור</Button>
-                <Button variant="outline" onClick={() => setOpen(false)}>ביטול</Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <StudyGroupDialog mode="create" teachers={teachers} classes={classes} subjects={subjects} onDone={() => router.refresh()} />
       </div>
       <div className="rounded-lg border overflow-hidden">
         <Table>
@@ -767,7 +820,7 @@ function StudyGroupsTab({ studyGroups, teachers, classes, subjects }: {
               <TableHead>רמה</TableHead>
               <TableHead>מורה</TableHead>
               <TableHead>כיתות</TableHead>
-              <TableHead className="w-16">פעולות</TableHead>
+              <TableHead className="w-24">פעולות</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -790,7 +843,17 @@ function StudyGroupsTab({ studyGroups, teachers, classes, subjects }: {
                   </div>
                 </TableCell>
                 <TableCell>
-                  <DeleteButton action={() => handleDelete(g.id)} entityName={g.name} />
+                  <div className="flex gap-1">
+                    <StudyGroupDialog
+                      mode="edit"
+                      group={g}
+                      teachers={teachers}
+                      classes={classes}
+                      subjects={subjects}
+                      onDone={() => router.refresh()}
+                    />
+                    <DeleteButton action={() => handleDelete(g.id)} entityName={g.name} />
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

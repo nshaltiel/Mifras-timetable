@@ -188,12 +188,14 @@ export async function createRoom(data: FormData) {
     type: data.get("type"),
     maxConcurrentClasses: data.get("maxConcurrentClasses") || 1,
   });
+  const categoryId = (data.get("categoryId") as string) || null;
 
   await prisma.room.create({
-    data: { ...parsed, schoolId },
+    data: { ...parsed, schoolId, categoryId: categoryId || null },
   });
 
   revalidatePath("/settings");
+  revalidatePath("/rooms");
 }
 
 export async function updateRoom(id: string, data: FormData) {
@@ -204,19 +206,22 @@ export async function updateRoom(id: string, data: FormData) {
     type: data.get("type"),
     maxConcurrentClasses: data.get("maxConcurrentClasses") || 1,
   });
+  const categoryId = (data.get("categoryId") as string) || null;
 
   await prisma.room.update({
     where: { id, schoolId },
-    data: parsed,
+    data: { ...parsed, categoryId: categoryId || null },
   });
 
   revalidatePath("/settings");
+  revalidatePath("/rooms");
 }
 
 export async function deleteRoom(id: string) {
   const schoolId = await getSchoolId();
   await prisma.room.delete({ where: { id, schoolId } });
   revalidatePath("/settings");
+  revalidatePath("/rooms");
 }
 
 // ─── Subjects ────────────────────────────────────
@@ -322,4 +327,119 @@ export async function importTeachersFromExcel(rows: {
 
   revalidatePath("/settings");
   return { created, errors };
+}
+
+// ─── Layers ──────────────────────────────────────────────────────────────────
+
+export async function createLayer(data: { name: string; roomIds?: string[] }) {
+  const schoolId = await getSchoolId();
+  const layer = await prisma.layer.create({
+    data: {
+      schoolId,
+      name: data.name.trim(),
+      allowedRooms: data.roomIds?.length
+        ? { create: data.roomIds.map((roomId) => ({ roomId })) }
+        : undefined,
+    },
+  });
+  revalidatePath("/classes");
+  return layer;
+}
+
+export async function updateLayer(id: string, data: { name: string; roomIds?: string[] }) {
+  const schoolId = await getSchoolId();
+  const layer = await prisma.layer.findFirst({ where: { id, schoolId } });
+  if (!layer) throw new Error("שכבה לא נמצאה");
+
+  await prisma.$transaction([
+    prisma.layer.update({ where: { id }, data: { name: data.name.trim() } }),
+    prisma.layerRoom.deleteMany({ where: { layerId: id } }),
+    ...(data.roomIds ?? []).map((roomId) =>
+      prisma.layerRoom.create({ data: { layerId: id, roomId } })
+    ),
+  ]);
+
+  revalidatePath("/classes");
+  revalidatePath("/rooms");
+}
+
+export async function deleteLayer(id: string) {
+  const schoolId = await getSchoolId();
+  const layer = await prisma.layer.findFirst({ where: { id, schoolId } });
+  if (!layer) throw new Error("שכבה לא נמצאה");
+  await prisma.layer.delete({ where: { id } });
+  revalidatePath("/classes");
+}
+
+export async function getLayers() {
+  const schoolId = await getSchoolId();
+  return prisma.layer.findMany({
+    where: { schoolId },
+    orderBy: { order: "asc" },
+    include: { allowedRooms: { select: { roomId: true } } },
+  });
+}
+
+// ─── Room Categories ─────────────────────────────────────────────────────────
+
+export async function createRoomCategory(data: { name: string }) {
+  const schoolId = await getSchoolId();
+  const count = await prisma.roomCategory.count({ where: { schoolId } });
+  const cat = await prisma.roomCategory.create({
+    data: { schoolId, name: data.name.trim(), order: count },
+  });
+  revalidatePath("/rooms");
+  return cat;
+}
+
+export async function updateRoomCategory(id: string, data: { name: string }) {
+  const schoolId = await getSchoolId();
+  const cat = await prisma.roomCategory.findFirst({ where: { id, schoolId } });
+  if (!cat) throw new Error("קטגוריה לא נמצאה");
+  await prisma.roomCategory.update({ where: { id }, data: { name: data.name.trim() } });
+  revalidatePath("/rooms");
+}
+
+export async function deleteRoomCategory(id: string) {
+  const schoolId = await getSchoolId();
+  const cat = await prisma.roomCategory.findFirst({ where: { id, schoolId } });
+  if (!cat) throw new Error("קטגוריה לא נמצאה");
+  await prisma.roomCategory.delete({ where: { id } });
+  revalidatePath("/rooms");
+}
+
+export async function getRoomCategories() {
+  const schoolId = await getSchoolId();
+  return prisma.roomCategory.findMany({
+    where: { schoolId },
+    orderBy: { order: "asc" },
+  });
+}
+
+// ─── Teacher ↔ Class exclusions ──────────────────────────────────────────────
+
+export async function setTeacherExcludedClasses(teacherId: string, classIds: string[]) {
+  const schoolId = await getSchoolId();
+  const teacher = await prisma.teacher.findFirst({ where: { id: teacherId, schoolId } });
+  if (!teacher) throw new Error("מורה לא נמצא/ה");
+
+  await prisma.$transaction([
+    prisma.teacherExcludedClass.deleteMany({ where: { teacherId } }),
+    ...classIds.map((classId) =>
+      prisma.teacherExcludedClass.create({ data: { teacherId, classId } })
+    ),
+  ]);
+
+  revalidatePath("/teachers");
+}
+
+export async function getTeacherExcludedClasses(teacherId: string) {
+  const schoolId = await getSchoolId();
+  const teacher = await prisma.teacher.findFirst({ where: { id: teacherId, schoolId } });
+  if (!teacher) throw new Error("מורה לא נמצא/ה");
+
+  return prisma.teacherExcludedClass.findMany({
+    where: { teacherId },
+    include: { class: { select: { id: true, name: true, grade: true } } },
+  });
 }

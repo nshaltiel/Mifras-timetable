@@ -12,8 +12,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, UsersRound } from "lucide-react";
+import { Plus, Trash2, Pencil, UsersRound } from "lucide-react";
 import { createStudyGroup, deleteStudyGroup } from "@/lib/study-group-actions";
+import { updateStudyGroup } from "@/lib/scheduling-actions";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
@@ -53,6 +54,7 @@ interface Props {
 
 export function StudyGroupsClient({ groups, teachers, classes, subjects }: Props) {
   const [open, setOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<StudyGroup | null>(null);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -62,6 +64,22 @@ export function StudyGroupsClient({ groups, teachers, classes, subjects }: Props
   const [level, setLevel] = useState("רגיל");
   const [teacherId, setTeacherId] = useState("");
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
+
+  function openCreate() {
+    setEditingGroup(null);
+    setName(""); setSubjectId(""); setLevel("רגיל"); setTeacherId(""); setSelectedClassIds([]);
+    setOpen(true);
+  }
+
+  function openEdit(group: StudyGroup) {
+    setEditingGroup(group);
+    setName(group.name);
+    setSubjectId(group.subject.id);
+    setLevel(group.level ?? "רגיל");
+    setTeacherId(group.teacher.id);
+    setSelectedClassIds(group.classes.map(({ class: c }) => c.id));
+    setOpen(true);
+  }
 
   const filteredTeachers = subjectId
     ? teachers.filter((t) => t.subjects.some((ts) => ts.subject.id === subjectId))
@@ -73,21 +91,23 @@ export function StudyGroupsClient({ groups, teachers, classes, subjects }: Props
     );
   }
 
-  function handleCreate() {
+  function handleSave() {
     if (!name || !subjectId || !teacherId || selectedClassIds.length === 0) return;
     startTransition(async () => {
       try {
-        await createStudyGroup({ name, subjectId, level, teacherId, classIds: selectedClassIds });
-        toast.success("קבוצת הלימוד נוצרה בהצלחה");
+        if (editingGroup) {
+          await updateStudyGroup(editingGroup.id, { name, subjectId, level, teacherId, classIds: selectedClassIds });
+          toast.success("קבוצת הלימוד עודכנה");
+        } else {
+          await createStudyGroup({ name, subjectId, level, teacherId, classIds: selectedClassIds });
+          toast.success("קבוצת הלימוד נוצרה בהצלחה");
+        }
         setOpen(false);
-        setName("");
-        setSubjectId("");
-        setLevel("רגיל");
-        setTeacherId("");
-        setSelectedClassIds([]);
+        setEditingGroup(null);
+        setName(""); setSubjectId(""); setLevel("רגיל"); setTeacherId(""); setSelectedClassIds([]);
         router.refresh();
       } catch {
-        toast.error("שגיאה ביצירת קבוצת הלימוד");
+        toast.error(editingGroup ? "שגיאה בעדכון" : "שגיאה ביצירת קבוצת הלימוד");
       }
     });
   }
@@ -114,18 +134,14 @@ export function StudyGroupsClient({ groups, teachers, classes, subjects }: Props
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
+        <Button className="gap-2" onClick={openCreate}>
+          <Plus className="h-4 w-4" />
+          קבוצה חדשה
+        </Button>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger
-            render={
-              <Button className="gap-2">
-                <Plus className="h-4 w-4" />
-                קבוצה חדשה
-              </Button>
-            }
-          />
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>יצירת קבוצת לימוד חדשה</DialogTitle>
+              <DialogTitle>{editingGroup ? "עריכת קבוצת לימוד" : "יצירת קבוצת לימוד חדשה"}</DialogTitle>
             </DialogHeader>
             <div className="space-y-3">
               <div className="space-y-1">
@@ -215,10 +231,10 @@ export function StudyGroupsClient({ groups, teachers, classes, subjects }: Props
 
               <div className="flex gap-2 pt-1">
                 <Button
-                  onClick={handleCreate}
+                  onClick={handleSave}
                   disabled={!name || !subjectId || !teacherId || selectedClassIds.length === 0 || isPending}
                 >
-                  צור קבוצה
+                  {isPending ? "שומר..." : editingGroup ? "שמור" : "צור קבוצה"}
                 </Button>
                 <Button variant="outline" onClick={() => setOpen(false)}>ביטול</Button>
               </div>
@@ -241,15 +257,26 @@ export function StudyGroupsClient({ groups, teachers, classes, subjects }: Props
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-start justify-between gap-2">
                   <span>{group.name}</span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive hover:text-destructive shrink-0"
-                    onClick={() => handleDelete(group.id, group.name)}
-                    disabled={isPending}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="flex gap-0.5 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => openEdit(group)}
+                      disabled={isPending}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-destructive hover:text-destructive"
+                      onClick={() => handleDelete(group.id, group.name)}
+                      disabled={isPending}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">

@@ -11,6 +11,14 @@ export interface SlotData {
   studyGroupId?: string | null;
 }
 
+/** Optional metadata for layer/exclusion checks. */
+export interface SlotContext {
+  /** Allowed room IDs for the class's layer. null = no restriction. */
+  allowedRoomIds?: string[] | null;
+  /** Teacher IDs excluded from teaching this class. */
+  excludedTeacherIds?: string[];
+}
+
 export interface TeacherConstraintData {
   teacherId: string;
   type: string;
@@ -22,7 +30,9 @@ export type ConflictType =
   | "TEACHER_DOUBLE_BOOKED"
   | "ROOM_DOUBLE_BOOKED"
   | "CLASS_DOUBLE_BOOKED"
-  | "TEACHER_CONSTRAINT_VIOLATED";
+  | "TEACHER_CONSTRAINT_VIOLATED"
+  | "ROOM_NOT_IN_LAYER"
+  | "TEACHER_EXCLUDED_FROM_CLASS";
 
 export interface Conflict {
   type: ConflictType;
@@ -38,7 +48,8 @@ export interface Conflict {
 export function detectConflicts(
   proposed: SlotData,
   existingSlots: SlotData[],
-  teacherConstraints: TeacherConstraintData[] = []
+  teacherConstraints: TeacherConstraintData[] = [],
+  context?: SlotContext
 ): Conflict[] {
   const conflicts: Conflict[] = [];
 
@@ -82,6 +93,32 @@ export function detectConflicts(
         slotB: existing,
       });
     }
+  }
+
+  // Layer room restriction check
+  if (
+    context?.allowedRoomIds != null &&
+    context.allowedRoomIds.length > 0 &&
+    proposed.roomId &&
+    !context.allowedRoomIds.includes(proposed.roomId)
+  ) {
+    conflicts.push({
+      type: "ROOM_NOT_IN_LAYER",
+      message: "החדר אינו מותר לשכבה של הכיתה",
+      slotA: proposed,
+    });
+  }
+
+  // Teacher excluded from class check
+  if (
+    context?.excludedTeacherIds &&
+    context.excludedTeacherIds.includes(proposed.teacherId)
+  ) {
+    conflicts.push({
+      type: "TEACHER_EXCLUDED_FROM_CLASS",
+      message: "המורה אינו/ה מורשה ללמד כיתה זו",
+      slotA: proposed,
+    });
   }
 
   // Teacher constraint check

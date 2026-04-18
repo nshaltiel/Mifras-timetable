@@ -14,6 +14,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
+        try {
         // Check SuperAdmin first
         const superAdmin = await prisma.superAdmin.findUnique({
           where: { email: credentials.email as string },
@@ -49,6 +50,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           schoolName: user.school.name,
           isSuperAdmin: false,
         };
+        } catch {
+          return null;
+        }
       },
     }),
   ],

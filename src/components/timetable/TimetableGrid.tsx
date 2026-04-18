@@ -29,7 +29,15 @@ type SubstitutionOverlay = {
 type TeacherInfo = { id: string; name: string; maxHoursPerWeek: number | null; subjects: { subject: { id: string; name: string; color: string | null } }[] };
 type SubjectInfo = { id: string; name: string; color: string | null };
 type RoomInfo = { id: string; name: string; capacity: number };
-type ClassInfo = { id: string; name: string; grade: number; studentCount: number };
+type ClassInfo = {
+  id: string;
+  name: string;
+  grade: number;
+  studentCount: number;
+  homeroomTeacherId?: string | null;
+  layerAllowedRoomIds?: string[] | null;
+  excludedTeacherIds?: string[];
+};
 type StudyGroupInfo = { id: string; name: string; subjectId: string; level: string | null; teacher: { id: string; name: string }; subject: { id: string; name: string; color: string | null }; classes: { classId: string }[] };
 
 interface TimetableGridProps {

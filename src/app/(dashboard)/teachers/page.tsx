@@ -1,116 +1,128 @@
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { createTeacher, deleteTeacher, updateTeacher } from "@/lib/actions";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/ui/page-header";
+import { EntityCard } from "@/components/ui/entity-card";
+import { Chip } from "@/components/ui/mifras-chip";
 import { TeacherDialog } from "./teacher-dialog";
 import { DeleteButton } from "@/components/ui/delete-button";
+import { Button } from "@/components/ui/button";
+import { Upload, Users } from "lucide-react";
 
 export default async function TeachersPage() {
   const session = await auth();
   const schoolId = (session?.user as Record<string, unknown>)?.schoolId as string;
 
-  const teachers = await prisma.teacher.findMany({
-    where: { schoolId },
-    include: {
-      subjects: { include: { subject: true } },
-      homeroomClass: true,
-      _count: { select: { slots: true } },
-    },
-    orderBy: { name: "asc" },
-  });
-
-  const subjects = await prisma.subject.findMany({
-    where: { schoolId },
-    orderBy: { name: "asc" },
-  });
+  const [teachers, subjects, classes] = await Promise.all([
+    prisma.teacher.findMany({
+      where: { schoolId },
+      include: {
+        subjects: { include: { subject: { select: { id: true, name: true, color: true } } } },
+        homeroomClass: { select: { id: true, name: true } },
+        excludedClasses: { include: { class: { select: { id: true, name: true, grade: true } } } },
+        _count: { select: { slots: true } },
+      },
+      orderBy: { name: "asc" },
+    }),
+    prisma.subject.findMany({ where: { schoolId }, orderBy: { name: "asc" } }),
+    prisma.class.findMany({
+      where: { schoolId },
+      select: { id: true, name: true, grade: true },
+      orderBy: [{ grade: "asc" }, { name: "asc" }],
+    }),
+  ]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">מורים</h2>
-        <TeacherDialog
-          subjects={subjects}
-          action={createTeacher}
-          title="הוספת מורה"
-        />
-      </div>
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>שם</TableHead>
-              <TableHead>אימייל</TableHead>
-              <TableHead>טלפון</TableHead>
-              <TableHead>מקצועות</TableHead>
-              <TableHead>כיתת אם</TableHead>
-              <TableHead>שעות מקסימום</TableHead>
-              <TableHead>שיעורים</TableHead>
-              <TableHead className="w-20">פעולות</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {teachers.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
-                  אין מורים עדיין. לחצו על &quot;הוספה&quot; כדי להתחיל.
-                </TableCell>
-              </TableRow>
-            ) : (
-              teachers.map((teacher) => (
-                <TableRow key={teacher.id}>
-                  <TableCell className="font-medium">{teacher.name}</TableCell>
-                  <TableCell dir="ltr" className="text-start">
-                    {teacher.email || "—"}
-                  </TableCell>
-                  <TableCell dir="ltr" className="text-start">
-                    {teacher.phone || "—"}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {teacher.subjects.map((ts) => (
-                        <Badge key={ts.id} variant="secondary" className="text-xs">
-                          {ts.subject.name}
-                        </Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell>{teacher.homeroomClass?.name || "—"}</TableCell>
-                  <TableCell>{teacher.maxHoursPerWeek ?? "—"}</TableCell>
-                  <TableCell>{teacher._count.slots}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <TeacherDialog
-                        subjects={subjects}
-                        action={updateTeacher.bind(null, teacher.id)}
-                        title="עריכת מורה"
-                        defaultValues={{
-                          name: teacher.name,
-                          email: teacher.email || "",
-                          phone: teacher.phone || "",
-                          maxHoursPerWeek: teacher.maxHoursPerWeek?.toString() || "",
-                        }}
-                        isEdit
-                      />
-                      <DeleteButton
-                        action={deleteTeacher.bind(null, teacher.id)}
-                        entityName={teacher.name}
-                      />
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="מורים"
+        subtitle={`${teachers.length} מורים`}
+        actions={
+          <>
+            <Button variant="outline" className="gap-1.5">
+              <Upload className="size-3.5" />
+              ייבוא מאקסל
+            </Button>
+            <TeacherDialog
+              subjects={subjects}
+              allClasses={classes}
+              action={createTeacher}
+              title="הוספת מורה"
+            />
+          </>
+        }
+      />
+
+      {teachers.length === 0 ? (
+        <div className="text-center py-20 text-mifras-ink-400">
+          <Users className="size-12 mx-auto mb-3 opacity-30" />
+          <p className="text-[14px]">אין מורים עדיין. לחצו על &quot;הוספת מורה&quot; כדי להתחיל.</p>
+        </div>
+      ) : (
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+          {teachers.map((teacher) => {
+            const initials = teacher.name.slice(0, 2);
+            const subjectNames = teacher.subjects.map((ts) => ts.subject.name);
+
+            return (
+              <EntityCard
+                key={teacher.id}
+                avatar={
+                  <div className="size-10 rounded-full bg-mifras-navy-50 text-mifras-navy-700 flex items-center justify-center text-[14px] font-bold shrink-0">
+                    {initials}
+                  </div>
+                }
+                title={teacher.name}
+                subtitle={
+                  teacher.maxHoursPerWeek
+                    ? `מקסימום ${teacher.maxHoursPerWeek} שעות/שבוע`
+                    : teacher.homeroomClass
+                    ? `מחנך/ת: ${teacher.homeroomClass.name}`
+                    : undefined
+                }
+                chips={
+                  <div className="flex flex-wrap gap-1">
+                    {subjectNames.slice(0, 3).map((name) => (
+                      <Chip key={name} tone="navy">{name}</Chip>
+                    ))}
+                    {subjectNames.length > 3 && (
+                      <Chip tone="ghost">+{subjectNames.length - 3}</Chip>
+                    )}
+                  </div>
+                }
+                stats={
+                  <div className="flex items-center gap-3">
+                    <span>{teacher._count.slots} שעות שבועיות</span>
+                    {teacher.homeroomClass && (
+                      <span>כיתת אם: {teacher.homeroomClass.name}</span>
+                    )}
+                  </div>
+                }
+                actions={
+                  <div className="flex gap-1">
+                    <TeacherDialog
+                      subjects={subjects}
+                      allClasses={classes}
+                      action={updateTeacher.bind(null, teacher.id)}
+                      title="עריכת מורה"
+                      defaultValues={{
+                        name: teacher.name,
+                        email: teacher.email || "",
+                        phone: teacher.phone || "",
+                        maxHoursPerWeek: teacher.maxHoursPerWeek?.toString() || "",
+                        subjectIds: teacher.subjects.map((ts) => ts.subjectId),
+                        excludedClassIds: teacher.excludedClasses.map((e) => e.classId),
+                      }}
+                      isEdit
+                    />
+                    <DeleteButton action={deleteTeacher.bind(null, teacher.id)} entityName={teacher.name} />
+                  </div>
+                }
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

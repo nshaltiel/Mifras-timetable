@@ -10,7 +10,50 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-assistant);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-assistant);
+  --font-heading: var(--font-rubik);
+  --font-display: var(--font-rubik);
+  /* Mifras tokens exposed as Tailwind color utilities */
+  --color-mifras-navy-900: var(--mifras-navy-900);
+  --color-mifras-navy-800: var(--mifras-navy-800);
+  --color-mifras-navy-700: var(--mifras-navy-700);
+  --color-mifras-navy-600: var(--mifras-navy-600);
+  --color-mifras-navy-500: var(--mifras-navy-500);
+  --color-mifras-navy-300: var(--mifras-navy-300);
+  --color-mifras-navy-100: var(--mifras-navy-100);
+  --color-mifras-navy-50: var(--mifras-navy-50);
+  --color-mifras-orange-700: var(--mifras-orange-700);
+  --color-mifras-orange-600: var(--mifras-orange-600);
+  --color-mifras-orange-500: var(--mifras-orange-500);
+  --color-mifras-orange-400: var(--mifras-orange-400);
+  --color-mifras-orange-300: var(--mifras-orange-300);
+  --color-mifras-orange-100: var(--mifras-orange-100);
+  --color-mifras-orange-50: var(--mifras-orange-50);
+  --color-mifras-gold-600: var(--mifras-gold-600);
+  --color-mifras-gold-500: var(--mifras-gold-500);
+  --color-mifras-gold-400: var(--mifras-gold-400);
+  --color-mifras-gold-200: var(--mifras-gold-200);
+  --color-mifras-gold-50: var(--mifras-gold-50);
+  --color-mifras-sky-500: var(--mifras-sky-500);
+  --color-mifras-sky-300: var(--mifras-sky-300);
+  --color-mifras-sky-100: var(--mifras-sky-100);
+  --color-mifras-paper: var(--mifras-paper);
+  --color-mifras-ink-900: var(--mifras-ink-900);
+  --color-mifras-ink-700: var(--mifras-ink-700);
+  --color-mifras-ink-500: var(--mifras-ink-500);
+  --color-mifras-ink-400: var(--mifras-ink-400);
+  --color-mifras-ink-300: var(--mifras-ink-300);
+  --color-mifras-ink-200: var(--mifras-ink-200);
+  --color-mifras-ink-100: var(--mifras-ink-100);
+  --color-mifras-ink-50: var(--mifras-ink-50);
+  --color-mifras-success: var(--mifras-success);
+  --color-mifras-warning: var(--mifras-warning);
+  --color-mifras-danger: var(--mifras-danger);
+  --color-mifras-info: var(--mifras-info);
+  --shadow-mifras-xs: var(--shadow-xs);
+  --shadow-mifras-sm: var(--shadow-sm);
+  --shadow-mifras-md: var(--shadow-md);
+  --shadow-mifras-lg: var(--shadow-lg);
+  --shadow-mifras-focus: var(--shadow-focus);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -50,38 +93,128 @@
 }
 
 :root {
-  --background: oklch(0.985 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.588 0.158 260);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.965 0.005 260);
-  --secondary-foreground: oklch(0.25 0.02 260);
-  --muted: oklch(0.965 0 0);
-  --muted-foreground: oklch(0.5 0 0);
-  --accent: oklch(0.955 0.01 260);
-  --accent-foreground: oklch(0.25 0.02 260);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.91 0 0);
-  --input: oklch(0.91 0 0);
-  --ring: oklch(0.588 0.158 260);
-  --chart-1: oklch(0.588 0.158 260);
-  --chart-2: oklch(0.65 0.18 150);
-  --chart-3: oklch(0.72 0.15 50);
-  --chart-4: oklch(0.6 0.2 310);
-  --chart-5: oklch(0.7 0.12 200);
-  --radius: 0.5rem;
-  --sidebar: oklch(0.975 0.005 260);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.588 0.158 260);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.955 0.01 260);
-  --sidebar-accent-foreground: oklch(0.25 0.02 260);
-  --sidebar-border: oklch(0.91 0 0);
-  --sidebar-ring: oklch(0.588 0.158 260);
+  /* =========================================================
+     Mifras Design System — primitives (ported verbatim)
+     ========================================================= */
+  /* Navy */
+  --mifras-navy-900: #0B2756;
+  --mifras-navy-800: #13306B;
+  --mifras-navy-700: #1D3E87;
+  --mifras-navy-600: #2A4EA3;
+  --mifras-navy-500: #3C69C4;
+  --mifras-navy-300: #8FA8D8;
+  --mifras-navy-100: #D6DFF0;
+  --mifras-navy-50:  #EEF2FA;
+  /* Orange */
+  --mifras-orange-700: #C8481F;
+  --mifras-orange-600: #E25A26;
+  --mifras-orange-500: #F08022;
+  --mifras-orange-400: #F59B3E;
+  --mifras-orange-300: #F8B968;
+  --mifras-orange-100: #FCE4C9;
+  --mifras-orange-50:  #FEF4E8;
+  /* Gold */
+  --mifras-gold-600: #E9B226;
+  --mifras-gold-500: #F3C63A;
+  --mifras-gold-400: #F7D45E;
+  --mifras-gold-200: #FBE9A3;
+  --mifras-gold-50:  #FEF8E2;
+  /* Sky */
+  --mifras-sky-500: #5DA5D1;
+  --mifras-sky-300: #9FC8E3;
+  --mifras-sky-100: #D6E8F2;
+  /* Neutrals */
+  --mifras-paper:   #FBF8F3;
+  --mifras-white:   #FFFFFF;
+  --mifras-ink-900: #0E1A2E;
+  --mifras-ink-700: #2F3A4F;
+  --mifras-ink-500: #5A6377;
+  --mifras-ink-400: #7C8497;
+  --mifras-ink-300: #A9AEBC;
+  --mifras-ink-200: #D3D7DF;
+  --mifras-ink-100: #EAECF1;
+  --mifras-ink-50:  #F4F5F8;
+  /* Semantic status */
+  --mifras-success: #3AA56B;
+  --mifras-warning: #F3C63A;
+  --mifras-danger:  #D84A2F;
+  --mifras-info:    #3C69C4;
+
+  /* Mifras semantic text/bg tokens */
+  --bg:            var(--mifras-white);
+  --bg-subtle:     var(--mifras-paper);
+  --bg-muted:      var(--mifras-ink-50);
+  --bg-inverse:    var(--mifras-navy-700);
+  --bg-sea:        var(--mifras-navy-600);
+  --bg-sea-deep:   var(--mifras-navy-800);
+  --fg:            var(--mifras-ink-900);
+  --fg-2:          var(--mifras-ink-700);
+  --fg-3:          var(--mifras-ink-500);
+  --fg-muted:      var(--mifras-ink-400);
+  --fg-inverse:    var(--mifras-white);
+  --fg-brand:      var(--mifras-navy-700);
+  --accent-hover:  var(--mifras-orange-600);
+  --accent-press:  var(--mifras-orange-700);
+  --accent-soft:   var(--mifras-orange-50);
+  --highlight:     var(--mifras-gold-500);
+  --highlight-soft:var(--mifras-gold-50);
+  --border-strong: var(--mifras-ink-300);
+  --border-brand:  var(--mifras-navy-700);
+  --focus-ring:    var(--mifras-orange-500);
+
+  /* Shadows — navy-tinted */
+  --shadow-xs: 0 1px 2px rgba(11, 39, 86, 0.06);
+  --shadow-sm: 0 2px 6px rgba(11, 39, 86, 0.08);
+  --shadow-md: 0 8px 20px rgba(11, 39, 86, 0.10);
+  --shadow-lg: 0 18px 40px rgba(11, 39, 86, 0.14);
+  --shadow-focus: 0 0 0 3px rgba(240, 128, 34, 0.35);
+
+  /* Motion */
+  --ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --dur-4: 520ms;
+
+  /* Pill radius (brand signature for primary CTA) */
+  --radius-pill: 999px;
+
+  /* =========================================================
+     shadcn CSS variables remapped onto Mifras tokens
+     ========================================================= */
+  --background: var(--mifras-paper);
+  --foreground: var(--mifras-ink-900);
+  --card: var(--mifras-white);
+  --card-foreground: var(--mifras-ink-900);
+  --popover: var(--mifras-white);
+  --popover-foreground: var(--mifras-ink-900);
+  --primary: var(--mifras-orange-500);
+  --primary-foreground: #ffffff;
+  --secondary: var(--mifras-navy-50);
+  --secondary-foreground: var(--mifras-navy-700);
+  --muted: var(--mifras-ink-50);
+  --muted-foreground: var(--mifras-ink-500);
+  --accent: var(--mifras-gold-500);
+  --accent-foreground: var(--mifras-ink-900);
+  --destructive: var(--mifras-danger);
+  --border: var(--mifras-ink-200);
+  --input: var(--mifras-ink-200);
+  --ring: var(--mifras-orange-500);
+  --chart-1: var(--mifras-orange-500);
+  --chart-2: var(--mifras-navy-600);
+  --chart-3: var(--mifras-gold-500);
+  --chart-4: var(--mifras-sky-500);
+  --chart-5: var(--mifras-success);
+  --radius: 0.75rem;
+  --sidebar: var(--mifras-white);
+  --sidebar-foreground: var(--mifras-ink-900);
+  --sidebar-primary: var(--mifras-orange-500);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--mifras-navy-50);
+  --sidebar-accent-foreground: var(--mifras-navy-700);
+  --sidebar-border: var(--mifras-ink-200);
+  --sidebar-ring: var(--mifras-orange-500);
 }
 
 .dark {
@@ -125,9 +258,19 @@
   body {
     @apply bg-background text-foreground;
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
   html {
     @apply font-sans;
+  }
+  h1, h2, h3, h4, h5 {
+    font-family: var(--font-rubik), var(--font-heebo), var(--font-assistant), system-ui, sans-serif;
+    color: var(--mifras-navy-700);
+  }
+  ::selection {
+    background: var(--mifras-gold-500);
+    color: var(--mifras-ink-900);
   }
 }

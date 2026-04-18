@@ -18,7 +18,15 @@ interface TimetablePageClientProps {
   initialData: {
     slots: TimetableSlot[];
     teachers: { id: string; name: string; maxHoursPerWeek: number | null; subjects: { subject: { id: string; name: string; color: string | null } }[] }[];
-    classes: { id: string; name: string; grade: number; studentCount: number }[];
+    classes: {
+      id: string;
+      name: string;
+      grade: number;
+      studentCount: number;
+      homeroomTeacherId: string | null;
+      layerAllowedRoomIds: string[] | null;
+      excludedTeacherIds: string[];
+    }[];
     subjects: { id: string; name: string; color: string | null }[];
     rooms: { id: string; name: string; capacity: number }[];
     constraints: { teacherId: string; type: string; day: number | null; period: number | null }[];

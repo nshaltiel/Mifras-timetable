@@ -30,6 +30,8 @@ export interface Requirement {
   /** Candidate teachers for this subject (for this class). First = preferred. */
   candidateTeachers: { id: string; name: string; maxHoursPerWeek?: number | null }[];
   studyGroupId: string | null;
+  /** If set, only this teacher can be assigned (homeroom subject). */
+  forcedTeacherId?: string | null;
   /** If true, this subject must not be placed adjacent to another lesson of itself on the same day. */
   noConsecutive?: boolean;
 }
@@ -68,6 +70,15 @@ export interface SchedulerInput {
   periodCount: number;
   /** Per-day last allowed period (0-based, inclusive). If omitted, all days use periodCount-1. */
   dayLastPeriods?: number[];
+  /**
+   * IDs of rooms allowed for this class's layer.
+   * null = any room allowed; [] = no rooms restricted (any allowed).
+   */
+  allowedRoomIds?: string[] | null;
+  /**
+   * Teacher IDs excluded from teaching this class (TeacherExcludedClass rows).
+   */
+  excludedTeacherIds?: string[];
 }
 
 export interface SchedulerOutput {
@@ -120,15 +131,22 @@ function roomOccupancy(roomId: string, day: number, period: number, slots: Exist
 /**
  * Finds a suitable room for a class at day+period.
  * Returns null if no room is available.
+ * allowedRoomIds: null = all rooms OK; defined array = filter to those IDs.
  */
 function findRoom(
   studentCount: number,
   day: number,
   period: number,
   slots: ExistingSlot[],
-  rooms: RoomOption[]
+  rooms: RoomOption[],
+  allowedRoomIds?: string[] | null
 ): RoomOption | null {
-  const candidates = rooms.filter(
+  const pool =
+    allowedRoomIds != null && allowedRoomIds.length > 0
+      ? rooms.filter((r) => allowedRoomIds.includes(r.id))
+      : rooms;
+
+  const candidates = pool.filter(
     (r) =>
       (r.capacity === 0 || r.capacity >= studentCount) &&
       roomOccupancy(r.id, day, period, slots) < r.maxConcurrentClasses
@@ -193,7 +211,11 @@ function scoreSlot(
 // ─── Main function ───────────────────────────────────────────────────────────
 
 export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
-  const { classId, className, classStudentCount, requirements, dayCount, periodCount, rooms, constraints } = input;
+  const {
+    classId, className, classStudentCount, requirements,
+    dayCount, periodCount, rooms, constraints,
+    allowedRoomIds, excludedTeacherIds,
+  } = input;
 
   // Working copy of slots — we append as we place
   const slots: ExistingSlot[] = [...input.existingSlots];
@@ -208,12 +230,24 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
   }
 
   for (const req of requirements) {
+    // Resolve effective candidate list, respecting forcedTeacherId and excludedTeacherIds
+    let effectiveCandidates = req.candidateTeachers;
+    if (req.forcedTeacherId) {
+      effectiveCandidates = effectiveCandidates.filter((t) => t.id === req.forcedTeacherId);
+    }
+    if (excludedTeacherIds && excludedTeacherIds.length > 0) {
+      effectiveCandidates = effectiveCandidates.filter((t) => !excludedTeacherIds.includes(t.id));
+    }
+
     // Quick check: no candidate teachers at all
-    if (req.candidateTeachers.length === 0) {
+    if (effectiveCandidates.length === 0) {
+      const reason = req.forcedTeacherId
+        ? "מחנך/ת הכיתה לא מוגדר/ת או לא זמין/ה לשיבוץ שעת מחנך"
+        : "אין מורים מוגדרים למקצוע זה";
       unplaced.push({
         subjectName: req.subjectName,
         remaining: req.hoursPerWeek,
-        reason: "אין מורים מוגדרים למקצוע זה",
+        reason,
       });
       continue;
     }
@@ -272,11 +306,11 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
         // Find an available teacher
         let chosenTeacher: { id: string; name: string } | null = null;
 
-        for (const teacher of req.candidateTeachers) {
+        for (const teacher of effectiveCandidates) {
           // Check weekly hour cap
           const hoursUsed = teacherHoursUsed.get(teacher.id) ?? 0;
           if (teacher.maxHoursPerWeek != null && hoursUsed >= teacher.maxHoursPerWeek) {
-            const msg = req.candidateTeachers.length === 1
+            const msg = effectiveCandidates.length === 1
               ? `${teacher.name} הגיע/ה למכסת שעות שבועית (${teacher.maxHoursPerWeek} שע׳)`
               : "מורי המקצוע הגיעו למכסת שעות שבועית";
             bump(5, msg);
@@ -297,7 +331,7 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
         if (!chosenTeacher) continue;
 
         // Find a room (optional — placed without room if none available)
-        const room = findRoom(classStudentCount, cand.day, cand.period, slots, rooms);
+        const room = findRoom(classStudentCount, cand.day, cand.period, slots, rooms, allowedRoomIds);
 
         // Commit the slot
         const newSlot: ExistingSlot = {
@@ -352,6 +386,162 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
           reason: "לא נמצאו מספיק חריצים זמינים",
         });
       }
+    }
+  }
+
+  return { placed, unplaced };
+}
+
+// ─── Grade-Level Scheduler ────────────────────────────────────────────────────
+/**
+ * Schedules a single subject for ALL classes in a grade simultaneously,
+ * ensuring each class gets the lesson at the same (day, period) pair.
+ * Each class has its own teacher (via study group). Teachers must be distinct.
+ */
+
+export interface GradeLevelAssignment {
+  classId: string;
+  className: string;
+  studentCount: number;
+  teacherId: string;
+  teacherName: string;
+  maxHoursPerWeek: number | null;
+  studyGroupId: string | null;
+  allowedRoomIds: string[] | null;
+}
+
+export interface GradeLevelInput {
+  subjectId: string;
+  subjectName: string;
+  subjectColor: string;
+  hoursPerWeek: number;
+  noConsecutive?: boolean;
+  assignments: GradeLevelAssignment[];
+  existingSlots: ExistingSlot[];
+  rooms: RoomOption[];
+  constraints: ConstraintEntry[];
+  dayCount: number;
+  periodCount: number;
+  dayLastPeriods?: number[];
+}
+
+export function runGradeLevelScheduler(input: GradeLevelInput): SchedulerOutput {
+  const {
+    subjectId, subjectName, subjectColor,
+    hoursPerWeek, noConsecutive,
+    assignments, rooms, constraints,
+    dayCount, periodCount,
+  } = input;
+
+  // Validate: teachers must be distinct
+  const teacherIds = assignments.map((a) => a.teacherId);
+  const uniqueTeacherIds = new Set(teacherIds);
+  if (uniqueTeacherIds.size < teacherIds.length) {
+    return {
+      placed: [],
+      unplaced: [{
+        subjectName,
+        remaining: hoursPerWeek,
+        reason: "שיעור ברמת שכבה דורש מורה נפרד/ת לכל כיתה — נמצאו מורים כפולים",
+      }],
+    };
+  }
+
+  const slots: ExistingSlot[] = [...input.existingSlots];
+  const placed: SchedulerSlot[] = [];
+  const unplaced: SchedulerOutput["unplaced"] = [];
+
+  // Pre-count used hours per teacher
+  const teacherHoursUsed = new Map<string, number>();
+  for (const s of input.existingSlots) {
+    teacherHoursUsed.set(s.teacherId, (teacherHoursUsed.get(s.teacherId) ?? 0) + 1);
+  }
+
+  for (let attempt = 0; attempt < hoursPerWeek; attempt++) {
+    // Candidate slots where EVERY class AND EVERY teacher is free
+    interface GradeSlotScore { day: number; period: number; score: number }
+    const candidates: GradeSlotScore[] = [];
+
+    for (let day = 0; day < dayCount; day++) {
+      const lastPeriod = input.dayLastPeriods?.[day] ?? periodCount - 1;
+      for (let period = 0; period <= lastPeriod; period++) {
+        // 1. All classes must be free
+        const allClassesFree = assignments.every(
+          (a) => !isClassBooked(a.classId, day, period, slots)
+        );
+        if (!allClassesFree) continue;
+
+        // 2. All teachers must be free and not unavailable
+        const allTeachersFree = assignments.every((a) => {
+          if (isTeacherUnavailable(a.teacherId, day, period, constraints)) return false;
+          if (isTeacherBooked(a.teacherId, day, period, slots)) return false;
+          const used = teacherHoursUsed.get(a.teacherId) ?? 0;
+          if (a.maxHoursPerWeek != null && used >= a.maxHoursPerWeek) return false;
+          return true;
+        });
+        if (!allTeachersFree) continue;
+
+        // 3. No-consecutive check across all classes
+        if (noConsecutive) {
+          const hasConsecutive = assignments.some((a) => {
+            const sameDayPlaced = placed
+              .filter((p) => p.classId === a.classId && p.day === day)
+              .map((p) => p.period);
+            return sameDayPlaced.some((p) => Math.abs(p - period) <= 1);
+          });
+          if (hasConsecutive) continue;
+        }
+
+        // Score: average gap-avoidance score across classes
+        const score =
+          assignments.reduce((sum, a) => sum + scoreSlot(day, period, a.classId, slots), 0) /
+          assignments.length;
+
+        if (score >= 99999) continue;
+        candidates.push({ day, period, score });
+      }
+    }
+
+    if (candidates.length === 0) {
+      unplaced.push({
+        subjectName,
+        remaining: hoursPerWeek - attempt,
+        reason: "לא נמצאה שעה משותפת שבה כל כיתות השכבה פנויות",
+      });
+      break;
+    }
+
+    candidates.sort((a, b) => a.score - b.score);
+    const best = candidates[0];
+
+    // Place one slot per assignment at the chosen (day, period)
+    for (const a of assignments) {
+      const room = findRoom(a.studentCount, best.day, best.period, slots, rooms, a.allowedRoomIds);
+
+      const newSlot: ExistingSlot = {
+        day: best.day,
+        period: best.period,
+        classId: a.classId,
+        teacherId: a.teacherId,
+        roomId: room?.id ?? null,
+      };
+      slots.push(newSlot);
+      teacherHoursUsed.set(a.teacherId, (teacherHoursUsed.get(a.teacherId) ?? 0) + 1);
+
+      placed.push({
+        day: best.day,
+        period: best.period,
+        classId: a.classId,
+        teacherId: a.teacherId,
+        subjectId,
+        roomId: room?.id ?? null,
+        studyGroupId: a.studyGroupId,
+        subjectName,
+        subjectColor,
+        teacherName: a.teacherName,
+        className: a.className,
+        roomName: room?.name,
+      });
     }
   }
 

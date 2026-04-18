@@ -42,6 +42,7 @@ export const SUBJECT_CATEGORY_HE: Record<string, string> = {
   core: "ליבה",
   elective: "בחירה",
   enrichment: "העשרה",
+  homeroom: "שעת מחנך",
 };
 
 export const GRADE_HE: Record<number, string> = {

@@ -1,10 +1,12 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/ui/page-header";
+import { Panel, PanelHead, PanelBody } from "@/components/ui/panel";
+import { StatusPill } from "@/components/ui/status-pill";
+import { Chip } from "@/components/ui/mifras-chip";
 import { Button } from "@/components/ui/button";
-import { ArrowLeftRight, ChevronLeft } from "lucide-react";
+import { ArrowLeftRight, ChevronLeft, Printer } from "lucide-react";
 import { PERIOD_LABELS } from "@/lib/constants";
 
 const SOLUTION_LABELS: Record<string, string> = {
@@ -16,6 +18,27 @@ const SOLUTION_LABELS: Record<string, string> = {
   DISTRIBUTE_TO_HOMEROOM: "פיקוח מחנך",
   SELF_STUDY: "שיעור עצמי",
 };
+
+const SOLUTION_TONE: Record<string, "navy" | "sky" | "gold" | "accent" | "ghost"> = {
+  SUBSTITUTE_TEACHER: "navy",
+  CANCEL_LESSON: "accent",
+  MERGE_CLASSES: "gold",
+  TIME_SWAP: "sky",
+  SELF_STUDY: "ghost",
+  DISSOLVE_STUDY_GROUP: "ghost",
+  DISTRIBUTE_TO_HOMEROOM: "gold",
+};
+
+function statusTone(s: string): "done" | "partial" | "open" | "neutral" {
+  if (s === "RESOLVED") return "done";
+  if (s === "PARTIALLY_RESOLVED") return "partial";
+  return "open";
+}
+function statusLabel(s: string) {
+  if (s === "RESOLVED") return "תוקן";
+  if (s === "PARTIALLY_RESOLVED") return "חלקי";
+  return "פתוח";
+}
 
 export default async function SubstitutionsPage() {
   const session = await auth();
@@ -29,9 +52,7 @@ export default async function SubstitutionsPage() {
       include: {
         teacher: { select: { id: true, name: true } },
         substitutions: {
-          include: {
-            substituteTeacher: { select: { name: true } },
-          },
+          include: { substituteTeacher: { select: { name: true } } },
         },
       },
     }),
@@ -62,162 +83,148 @@ export default async function SubstitutionsPage() {
     })
   );
 
+  const todayLabel = new Date().toLocaleDateString("he-IL", {
+    weekday: "long", day: "numeric", month: "long",
+  });
+
   function formatDate(dateStr: string) {
-    const d = new Date(dateStr + "T12:00:00");
-    return d.toLocaleDateString("he-IL", { weekday: "short", day: "numeric", month: "short" });
+    return new Date(dateStr + "T12:00:00").toLocaleDateString("he-IL", {
+      weekday: "short", day: "numeric", month: "short",
+    });
   }
 
+  // Build a flat substitutions table for printing
+  const allSubRows: {
+    period: number; teacherName: string; solutionType: string; substituteName?: string; status: string;
+  }[] = todayAbsences.flatMap((absence) =>
+    absence.teachablePeriods.map((p) => {
+      const sub = absence.substitutions.find((s) => s.period === p);
+      return {
+        period: p,
+        teacherName: absence.teacher.name,
+        solutionType: sub?.solutionType ?? "",
+        substituteName: sub?.substituteTeacher?.name,
+        status: absence.status,
+      };
+    })
+  ).sort((a, b) => a.period - b.period);
+
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold">לוח שינויים</h2>
+    <div className="space-y-5">
+      <PageHeader
+        title="לוח שינויים"
+        subtitle={`מילוי מקום · ${todayLabel}`}
+        actions={
+          <Button variant="outline" className="gap-1.5" onClick={undefined}>
+            <Printer className="size-3.5" />
+            הדפסה
+          </Button>
+        }
+      />
 
-      {/* Today */}
-      <section>
-        <h3 className="text-lg font-semibold mb-3">
-          היום —{" "}
-          {new Date().toLocaleDateString("he-IL", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-          })}
-        </h3>
+      {/* Today panel — flat substitution table */}
+      <Panel>
+        <PanelHead
+          icon={<ArrowLeftRight />}
+          title={`היום · ${allSubRows.length} מילויי מקום`}
+          count={todayAbsences.filter((a) => a.status !== "RESOLVED").length || undefined}
+        />
         {todayAbsences.length === 0 ? (
-          <Card>
-            <CardContent className="py-8 text-center text-muted-foreground">
-              <ArrowLeftRight className="h-10 w-10 mx-auto mb-2 opacity-30" />
-              <p>אין היעדרויות היום</p>
-            </CardContent>
-          </Card>
+          <PanelBody className="py-12 text-center">
+            <ArrowLeftRight className="size-10 mx-auto text-mifras-ink-200 mb-3" />
+            <p className="text-mifras-ink-400 text-[13.5px]">אין היעדרויות היום</p>
+          </PanelBody>
         ) : (
-          <div className="space-y-3">
-            {todayAbsences.map((absence) => {
-              const resolvedPeriods = absence.substitutions.map((s) => s.period);
-
-              return (
-                <Card key={absence.id}>
-                  <CardContent className="py-3 px-4">
-                    <div className="flex items-start gap-3">
-                      <div className="flex-1 space-y-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium">{absence.teacher.name}</span>
-                          <Badge
-                            variant={
-                              absence.status === "RESOLVED"
-                                ? "secondary"
-                                : absence.status === "PARTIALLY_RESOLVED"
-                                ? "default"
-                                : "destructive"
-                            }
-                            className="text-xs"
-                          >
-                            {absence.status === "RESOLVED"
-                              ? "תוקן"
-                              : absence.status === "PARTIALLY_RESOLVED"
-                              ? "תוקן חלקית"
-                              : "לא תוקן"}
-                          </Badge>
-                        </div>
-
-                        {/* Substitution details by period — only show periods with actual lessons */}
-                        <div className="space-y-1">
-                          {absence.teachablePeriods.map((p) => {
-                            const sub = absence.substitutions.find((s) => s.period === p);
-                            return (
-                              <div key={p} className="flex items-center gap-2 text-sm">
-                                <span className="text-muted-foreground min-w-[3.5rem]">
-                                  {PERIOD_LABELS[p] || `שיעור ${p + 1}`}
-                                </span>
-                                {sub ? (
-                                  <>
-                                    <span
-                                      className={`text-xs px-1.5 py-0.5 rounded-full
-                                      ${sub.solutionType === "SUBSTITUTE_TEACHER"
-                                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                                        : sub.solutionType === "CANCEL_LESSON"
-                                        ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                                        : "bg-muted text-muted-foreground"
-                                      }`}
-                                    >
-                                      {SOLUTION_LABELS[sub.solutionType] || sub.solutionType}
-                                    </span>
-                                    {sub.substituteTeacher && (
-                                      <span className="text-muted-foreground">
-                                        → {sub.substituteTeacher.name}
-                                      </span>
-                                    )}
-                                  </>
-                                ) : (
-                                  <span className="text-destructive text-xs">לא תוקן</span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <Link href={`/substitutions/${absence.id}`}>
-                        <Button variant="outline" size="sm" className="gap-1.5 text-xs shrink-0">
-                          {resolvedPeriods.length < absence.teachablePeriods.length ? "טפל" : "צפה"}
-                          <ChevronLeft className="h-3 w-3" />
-                        </Button>
-                      </Link>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13.5px]">
+              <thead>
+                <tr className="bg-mifras-paper border-b border-mifras-ink-100">
+                  {["שעה", "מורה נעדר", "כיתה", "פתרון", "מחליף", ""].map((h) => (
+                    <th key={h} className="text-start px-4 py-3 font-semibold text-mifras-navy-700 text-[12px]">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-mifras-ink-100">
+                {todayAbsences.map((absence) =>
+                  absence.teachablePeriods.map((p) => {
+                    const sub = absence.substitutions.find((s) => s.period === p);
+                    return (
+                      <tr key={`${absence.id}-${p}`} className="hover:bg-mifras-ink-50 transition-colors">
+                        <td className="px-4 py-3 font-semibold text-mifras-navy-700">
+                          {PERIOD_LABELS[p] || `ש' ${p + 1}`}
+                        </td>
+                        <td className="px-4 py-3">{absence.teacher.name}</td>
+                        <td className="px-4 py-3 text-mifras-ink-500">—</td>
+                        <td className="px-4 py-3">
+                          {sub ? (
+                            <Chip tone={SOLUTION_TONE[sub.solutionType] ?? "ghost"}>
+                              {SOLUTION_LABELS[sub.solutionType] ?? sub.solutionType}
+                            </Chip>
+                          ) : (
+                            <StatusPill tone="open">לא תוקן</StatusPill>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-mifras-ink-500">
+                          {sub?.substituteTeacher?.name ?? "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Link href={`/substitutions/${absence.id}`}>
+                            <Button variant="ghost" size="sm" className="gap-1 text-mifras-orange-600 h-7 px-2 text-[12px]">
+                              {sub ? "עדכן" : "טפל"}
+                              <ChevronLeft className="size-3" />
+                            </Button>
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         )}
-      </section>
+      </Panel>
 
       {/* Recent 7 days */}
       {recentAbsences.filter((a) => a.date !== today).length > 0 && (
-        <section>
-          <h3 className="text-lg font-semibold mb-3">7 ימים אחרונים</h3>
-          <div className="space-y-2">
-            {recentAbsences
-              .filter((a) => a.date !== today)
-              .map((absence) => {
-                const periods: number[] = JSON.parse(absence.periods);
-                return (
-                  <Card key={absence.id}>
-                    <CardContent className="py-2.5 px-4">
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm text-muted-foreground min-w-[5rem]">
-                          {formatDate(absence.date)}
-                        </span>
-                        <span className="font-medium text-sm">{absence.teacher.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {periods.length} שיעורים
-                        </span>
-                        <Badge
-                          variant={
-                            absence.status === "RESOLVED"
-                              ? "secondary"
-                              : absence.status === "PARTIALLY_RESOLVED"
-                              ? "default"
-                              : "destructive"
-                          }
-                          className="text-xs ms-auto"
-                        >
-                          {absence.status === "RESOLVED"
-                            ? "תוקן"
-                            : absence.status === "PARTIALLY_RESOLVED"
-                            ? "חלקי"
-                            : "לא תוקן"}
-                        </Badge>
+        <Panel>
+          <PanelHead title="7 ימים אחרונים" />
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13.5px]">
+              <thead>
+                <tr className="bg-mifras-paper border-b border-mifras-ink-100">
+                  {["תאריך", "מורה", "סטטוס", ""].map((h) => (
+                    <th key={h} className="text-start px-4 py-3 font-semibold text-mifras-navy-700 text-[12px]">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-mifras-ink-100">
+                {recentAbsences
+                  .filter((a) => a.date !== today)
+                  .map((absence) => (
+                    <tr key={absence.id} className="hover:bg-mifras-ink-50 transition-colors">
+                      <td className="px-4 py-3 text-mifras-ink-500">{formatDate(absence.date)}</td>
+                      <td className="px-4 py-3 font-medium text-mifras-ink-900">{absence.teacher.name}</td>
+                      <td className="px-4 py-3">
+                        <StatusPill tone={statusTone(absence.status)}>
+                          {statusLabel(absence.status)}
+                        </StatusPill>
+                      </td>
+                      <td className="px-4 py-3">
                         <Link href={`/substitutions/${absence.id}`}>
-                          <Button variant="ghost" size="icon" className="h-7 w-7">
-                            <ChevronLeft className="h-3.5 w-3.5" />
+                          <Button variant="ghost" size="icon" className="size-7 text-mifras-ink-400 hover:text-mifras-orange-600">
+                            <ChevronLeft className="size-3.5" />
                           </Button>
                         </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
           </div>
-        </section>
+        </Panel>
       )}
     </div>
   );

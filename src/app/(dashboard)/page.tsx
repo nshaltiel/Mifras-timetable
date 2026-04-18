@@ -1,10 +1,18 @@
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { UserMinus, AlertTriangle, ArrowLeftRight, ChevronLeft } from "lucide-react";
+import { getDashboardInsights } from "@/lib/dashboard-actions";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatCard } from "@/components/ui/stat-card";
+import { Panel, PanelHead, PanelBody } from "@/components/ui/panel";
+import { StatusPill } from "@/components/ui/status-pill";
+import { Button } from "@/components/ui/button";
+import { PERIOD_LABELS, DAYS_HE, ABSENCE_REASON_HE } from "@/lib/constants";
+import {
+  UserMinus, ArrowLeftRight, CalendarDays, Users,
+  AlertTriangle, Compass, ChevronLeft,
+} from "lucide-react";
 import Link from "next/link";
-import { PERIOD_LABELS } from "@/lib/constants";
+import Image from "next/image";
 
 const SOLUTION_LABELS: Record<string, string> = {
   SUBSTITUTE_TEACHER: "מורה מחליף",
@@ -16,49 +24,57 @@ const SOLUTION_LABELS: Record<string, string> = {
   SELF_STUDY: "שיעור עצמי",
 };
 
+const DOW_HE = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+
 export default async function DashboardPage() {
   const session = await auth();
   const schoolId = (session?.user as Record<string, unknown>)?.schoolId as string;
-  const schoolName = (session?.user as Record<string, unknown>)?.schoolName as string;
 
-  if (!schoolId) {
-    return <div>לא נמצא בית ספר</div>;
-  }
+  if (!schoolId) return <div>לא נמצא בית ספר</div>;
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const [unresolvedAbsencesRaw, todayAbsences, todaySubstitutions] = await Promise.all([
-    // Unresolved absences (all dates)
-    prisma.absence.findMany({
-      where: { teacher: { schoolId }, status: { in: ["UNRESOLVED", "PARTIALLY_RESOLVED"] } },
-      include: {
-        teacher: { select: { id: true, name: true } },
-        substitutions: { select: { period: true, solutionType: true } },
-      },
-      orderBy: [{ date: "desc" }],
-    }),
-    // Today's absences
-    prisma.absence.findMany({
-      where: { date: today, teacher: { schoolId } },
-      include: {
-        teacher: { select: { id: true, name: true } },
-      },
-      orderBy: { teacher: { name: "asc" } },
-    }),
-    // Today's substitutions with details
-    prisma.substitution.findMany({
-      where: {
-        absence: { date: today, teacher: { schoolId } },
-      },
-      include: {
-        absence: {
-          include: { teacher: { select: { id: true, name: true } } },
+  // Week start/end (Sun–Fri)
+  const todayDate = new Date();
+  const dow = todayDate.getDay();
+  const weekStart = new Date(todayDate);
+  weekStart.setDate(todayDate.getDate() - dow);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 5);
+  const weekStartStr = weekStart.toISOString().slice(0, 10);
+  const weekEndStr = weekEnd.toISOString().slice(0, 10);
+
+  const [unresolvedAbsencesRaw, todayAbsences, todaySubstitutions, totalSlots, insights] =
+    await Promise.all([
+      prisma.absence.findMany({
+        where: { teacher: { schoolId }, status: { in: ["UNRESOLVED", "PARTIALLY_RESOLVED"] } },
+        include: {
+          teacher: { select: { id: true, name: true } },
+          substitutions: { select: { period: true, solutionType: true } },
         },
-        substituteTeacher: { select: { id: true, name: true } },
-      },
-      orderBy: { period: "asc" },
-    }),
-  ]);
+        orderBy: [{ date: "desc" }],
+      }),
+      prisma.absence.findMany({
+        where: { date: today, teacher: { schoolId } },
+        include: { teacher: { select: { id: true, name: true } } },
+        orderBy: { teacher: { name: "asc" } },
+      }),
+      prisma.substitution.findMany({
+        where: { absence: { date: today, teacher: { schoolId } } },
+        include: {
+          absence: { include: { teacher: { select: { id: true, name: true } } } },
+          substituteTeacher: { select: { id: true, name: true } },
+        },
+        orderBy: { period: "asc" },
+      }),
+      prisma.timetableSlot.count({ where: { class: { schoolId } } }),
+      getDashboardInsights(weekStartStr, weekEndStr),
+    ]);
+
+  const absentTeachersToday = new Set(todayAbsences.map((a) => a.teacherId)).size;
+  const subDone = todaySubstitutions.filter(
+    (s) => s.solutionType !== "CANCEL_LESSON"
+  ).length;
 
   // Enrich unresolved absences with teachable periods
   const unresolvedAbsences = await Promise.all(
@@ -73,156 +89,247 @@ export default async function DashboardPage() {
     })
   );
 
-  function formatDate(dateStr: string) {
-    const d = new Date(dateStr + "T12:00:00");
-    return d.toLocaleDateString("he-IL", { weekday: "short", day: "numeric", month: "short" });
+  function formatDate(d: string) {
+    return new Date(d + "T12:00:00").toLocaleDateString("he-IL", {
+      weekday: "short", day: "numeric", month: "short",
+    });
   }
 
-  // Enrich unresolved absences with teachable period count (for correct status display)
-  // Group today substitutions by period for easy display
-  const subsByPeriod = todaySubstitutions.reduce<Record<number, typeof todaySubstitutions>>((acc, sub) => {
-    if (!acc[sub.period]) acc[sub.period] = [];
-    acc[sub.period].push(sub);
-    return acc;
-  }, {});
+  const subsByPeriod = todaySubstitutions.reduce<Record<number, typeof todaySubstitutions>>(
+    (acc, sub) => {
+      if (!acc[sub.period]) acc[sub.period] = [];
+      acc[sub.period].push(sub);
+      return acc;
+    },
+    {}
+  );
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold">לוח בקרה</h2>
-        {schoolName && <p className="text-muted-foreground mt-1">{schoolName}</p>}
+      <PageHeader title="לוח בקרה" subtitle={`${new Date().toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`} />
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <StatCard
+          variant="accent"
+          icon={<UserMinus />}
+          value={todayAbsences.length}
+          label="היעדרויות היום"
+        />
+        <StatCard
+          variant="navy"
+          icon={<Users />}
+          value={absentTeachersToday}
+          label="מורים נעדרים היום"
+        />
+        <StatCard
+          variant="gold"
+          icon={<ArrowLeftRight />}
+          value={todaySubstitutions.length}
+          label="מילויי מקום היום"
+          trend={
+            todaySubstitutions.length > 0
+              ? `${Math.round((subDone / todaySubstitutions.length) * 100)}% סגורים`
+              : undefined
+          }
+        />
+        <StatCard
+          variant="sky"
+          icon={<CalendarDays />}
+          value={totalSlots}
+          label="שיעורים במערכת"
+        />
       </div>
 
-      {/* Unresolved absences */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <AlertTriangle className="h-5 w-5 text-destructive" />
-          <h3 className="text-lg font-semibold">היעדרויות שלא טופלו</h3>
-          {unresolvedAbsences.length > 0 && (
-            <Badge variant="destructive" className="text-xs">{unresolvedAbsences.length}</Badge>
+      {/* Main layout: main + insights aside */}
+      <div className="flex gap-6 items-start">
+        {/* Left column (main) */}
+        <div className="flex-1 min-w-0 space-y-5">
+          {/* Unresolved absences panel */}
+          <Panel>
+            <PanelHead
+              icon={<AlertTriangle />}
+              title="היעדרויות שדורשות טיפול"
+              count={unresolvedAbsences.length || undefined}
+              actions={
+                <Link href="/absences">
+                  <Button variant="ghost" size="sm" className="text-mifras-orange-600 gap-1">
+                    ראה הכל
+                    <ChevronLeft className="size-3.5" />
+                  </Button>
+                </Link>
+              }
+            />
+            <PanelBody className="p-0">
+              {unresolvedAbsences.length === 0 ? (
+                <p className="text-center text-mifras-ink-400 text-[13.5px] py-8">אין היעדרויות שלא טופלו</p>
+              ) : (
+                <ul className="divide-y divide-mifras-ink-100">
+                  {unresolvedAbsences.slice(0, 6).map((absence) => {
+                    const resolvedPeriods = absence.substitutions.map((s) => s.period);
+                    const unresolved = absence.teachablePeriods.filter((p) => !resolvedPeriods.includes(p));
+                    const isPartial = absence.status === "PARTIALLY_RESOLVED";
+                    return (
+                      <li key={absence.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-mifras-ink-50 transition-colors">
+                        {/* Avatar */}
+                        <div className="size-8 rounded-full bg-mifras-navy-50 text-mifras-navy-700 flex items-center justify-center text-[12px] font-semibold shrink-0">
+                          {absence.teacher.name.slice(0, 1)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13.5px] font-semibold text-mifras-ink-900 truncate">
+                            {absence.teacher.name}
+                          </div>
+                          <div className="text-[11.5px] text-mifras-ink-400 mt-0.5">
+                            {formatDate(absence.date)}
+                          </div>
+                        </div>
+                        <div className="flex gap-1 flex-wrap justify-end">
+                          {unresolved.map((p) => (
+                            <span
+                              key={p}
+                              className="inline-flex items-center px-1.5 h-[20px] rounded-md text-[10.5px] bg-red-50 text-mifras-danger font-medium"
+                            >
+                              ש׳ {p + 1}
+                            </span>
+                          ))}
+                          {resolvedPeriods.map((p) => (
+                            <span
+                              key={`r-${p}`}
+                              className="inline-flex items-center px-1.5 h-[20px] rounded-md text-[10.5px] bg-emerald-50 text-mifras-success font-medium"
+                            >
+                              ✓ {p + 1}
+                            </span>
+                          ))}
+                        </div>
+                        <StatusPill tone={isPartial ? "partial" : "open"} className="shrink-0">
+                          {isPartial ? "חלקי" : "פתוח"}
+                        </StatusPill>
+                        <Link href={`/substitutions/${absence.id}`} className="shrink-0">
+                          <Button variant="ghost" size="sm" className="text-mifras-orange-600 gap-0.5 h-7 px-2">
+                            המשך טיפול
+                            <ChevronLeft className="size-3" />
+                          </Button>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </PanelBody>
+          </Panel>
+
+          {/* Today substitutions table */}
+          {todaySubstitutions.length > 0 && (
+            <Panel>
+              <PanelHead
+                icon={<ArrowLeftRight />}
+                title="מילוי מקום היום"
+                count={todaySubstitutions.length}
+              />
+              <PanelBody className="p-0 overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="bg-mifras-paper border-b border-mifras-ink-100">
+                      {["שעה", "מורה נעדר", "פתרון", "מחליף"].map((h) => (
+                        <th key={h} className="text-start px-4 py-2.5 font-semibold text-mifras-navy-700 text-[12px]">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-mifras-ink-100">
+                    {Object.keys(subsByPeriod)
+                      .sort((a, b) => Number(a) - Number(b))
+                      .flatMap((p) =>
+                        subsByPeriod[Number(p)].map((sub, i) => (
+                          <tr key={sub.id} className="hover:bg-mifras-ink-50">
+                            {i === 0 && (
+                              <td
+                                className="px-4 py-3 font-semibold text-mifras-navy-700"
+                                rowSpan={subsByPeriod[Number(p)].length}
+                              >
+                                {PERIOD_LABELS[Number(p)] || `שיעור ${Number(p) + 1}`}
+                              </td>
+                            )}
+                            <td className="px-4 py-3">{sub.absence.teacher.name}</td>
+                            <td className="px-4 py-3">
+                              <span className="inline-flex px-2 h-[20px] rounded-md text-[11px] bg-mifras-ink-50 text-mifras-ink-700 items-center">
+                                {SOLUTION_LABELS[sub.solutionType] || sub.solutionType}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-mifras-ink-500">
+                              {sub.substituteTeacher?.name || "—"}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                  </tbody>
+                </table>
+              </PanelBody>
+            </Panel>
           )}
         </div>
-        {unresolvedAbsences.length === 0 ? (
-          <Card>
-            <CardContent className="py-6 text-center text-muted-foreground text-sm">
-              <p>אין היעדרויות שלא טופלו</p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            {unresolvedAbsences.map((absence) => {
-              const resolvedPeriods = absence.substitutions.map((s) => s.period);
-              const unresolvedPeriods = absence.teachablePeriods.filter(p => !resolvedPeriods.includes(p));
-              return (
-                <Card key={absence.id} className="border-destructive/30">
-                  <CardContent className="py-2.5 px-4">
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="text-xs text-muted-foreground min-w-[4rem]">
-                        {formatDate(absence.date)}
-                      </span>
-                      <span className="font-medium text-sm">{absence.teacher.name}</span>
-                      <div className="flex gap-1 flex-wrap">
-                        {unresolvedPeriods.map(p => (
-                          <span key={p} className="text-xs px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">
-                            {PERIOD_LABELS[p] || `שיעור ${p + 1}`}
-                          </span>
-                        ))}
-                      </div>
-                      {absence.status === "PARTIALLY_RESOLVED" && (
-                        <Badge variant="default" className="text-xs">תוקן חלקית</Badge>
-                      )}
-                      <Link href={`/substitutions/${absence.id}`} className="ms-auto">
-                        <button className="flex items-center gap-1 text-xs text-primary hover:underline">
-                          טפל
-                          <ChevronLeft className="h-3 w-3" />
-                        </button>
-                      </Link>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </section>
 
-      {/* Today's absences */}
-      {todayAbsences.length > 0 && (
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <UserMinus className="h-5 w-5 text-muted-foreground" />
-            <h3 className="text-lg font-semibold">היעדרויות היום</h3>
-          </div>
-          <div className="space-y-2">
-            {todayAbsences.map((absence) => {
-              const periods: number[] = JSON.parse(absence.periods);
-              return (
-                <Card key={absence.id}>
-                  <CardContent className="py-2.5 px-4">
-                    <div className="flex items-center gap-3">
-                      <span className="font-medium text-sm">{absence.teacher.name}</span>
-                      <span className="text-xs text-muted-foreground">{periods.length} שיעורים</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ms-auto ${
-                        absence.status === "RESOLVED"
-                          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                          : absence.status === "PARTIALLY_RESOLVED"
-                          ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                          : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                      }`}>
-                        {absence.status === "RESOLVED" ? "תוקן" : absence.status === "PARTIALLY_RESOLVED" ? "חלקי" : "לא תוקן"}
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Today's substitutions */}
-      {todaySubstitutions.length > 0 && (
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <ArrowLeftRight className="h-5 w-5 text-muted-foreground" />
-            <h3 className="text-lg font-semibold">מילוי מקום היום</h3>
-          </div>
-          <div className="rounded-lg border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-start px-3 py-2 font-medium text-muted-foreground text-xs">שיעור</th>
-                  <th className="text-start px-3 py-2 font-medium text-muted-foreground text-xs">מורה נעדר</th>
-                  <th className="text-start px-3 py-2 font-medium text-muted-foreground text-xs">פתרון</th>
-                  <th className="text-start px-3 py-2 font-medium text-muted-foreground text-xs">מחליף</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {Object.keys(subsByPeriod).sort((a, b) => Number(a) - Number(b)).flatMap(p =>
-                  subsByPeriod[Number(p)].map((sub, i) => (
-                    <tr key={sub.id} className="hover:bg-muted/30">
-                      {i === 0 && (
-                        <td className="px-3 py-2 font-medium" rowSpan={subsByPeriod[Number(p)].length}>
-                          {PERIOD_LABELS[Number(p)] || `שיעור ${Number(p) + 1}`}
-                        </td>
-                      )}
-                      <td className="px-3 py-2">{sub.absence.teacher.name}</td>
-                      <td className="px-3 py-2">
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-muted">
-                          {SOLUTION_LABELS[sub.solutionType] || sub.solutionType}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-muted-foreground">
-                        {sub.substituteTeacher?.name || "—"}
-                      </td>
-                    </tr>
-                  ))
+        {/* Right aside — insights */}
+        <aside className="w-[340px] shrink-0">
+          <Panel className="relative overflow-hidden">
+            <PanelHead
+              icon={<Compass />}
+              title="תובנות השבוע"
+            />
+            <PanelBody className="space-y-4 text-[13.5px] text-mifras-ink-700 leading-relaxed">
+              {/* Absences resolution rate */}
+              <p>
+                <b className="text-mifras-navy-700">היעדרויות השבוע:</b>{" "}
+                {insights.absencesWeek.total} היעדרויות —{" "}
+                <span className="text-mifras-success font-semibold">
+                  {insights.absencesWeek.resolutionRate}% נסגרו
+                </span>
+                {insights.absencesWeek.topReasons[0] && (
+                  <>, הסיבה הנפוצה: {ABSENCE_REASON_HE[insights.absencesWeek.topReasons[0].reason] ?? insights.absencesWeek.topReasons[0].reason}</>
                 )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
+              </p>
+
+              {/* Room utilization */}
+              {insights.roomUtil.length > 0 && (
+                <p>
+                  <b className="text-mifras-navy-700">ניצולת חדרים:</b>{" "}
+                  הכי עמוס: {insights.roomUtil[0].roomName} ({Math.round(insights.roomUtil[0].utilization * 100)}%){" "}
+                  {insights.roomUtil.length > 1 && (
+                    <>· הכי פנוי: {insights.roomUtil[insights.roomUtil.length - 1].roomName} ({Math.round(insights.roomUtil[insights.roomUtil.length - 1].utilization * 100)}%)</>
+                  )}
+                </p>
+              )}
+
+              {/* Top substitutes */}
+              {insights.subLeaders.length > 0 && (
+                <p>
+                  <b className="text-mifras-navy-700">ממלאי מקום מובילים (14 יום):</b>{" "}
+                  {insights.subLeaders.map((l) => `${l.teacherName} ${l.count}`).join(", ")}
+                </p>
+              )}
+
+              {/* Absence patterns */}
+              {insights.patterns.length > 0 && (
+                <div className="space-y-1">
+                  <b className="text-mifras-navy-700 block">תבניות היעדרות שזוהו:</b>
+                  {insights.patterns.map((p, i) => (
+                    <p key={i} className="text-[12.5px] text-mifras-ink-500">
+                      {p.teacherName} — {Math.round(p.share * 100)}% מהיעדרויותיה ביום{" "}
+                      {DOW_HE[p.bucket]}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </PanelBody>
+
+            {/* Decorative boat watermark */}
+            <div className="absolute bottom-0 end-0 opacity-[0.07] pointer-events-none">
+              <Image src="/brand/boat.png" alt="" width={160} height={120} className="object-contain" />
+            </div>
+          </Panel>
+        </aside>
+      </div>
     </div>
   );
 }

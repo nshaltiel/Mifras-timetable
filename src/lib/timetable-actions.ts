@@ -36,6 +36,10 @@ export async function loadTimetableData(classId?: string) {
       }),
       prisma.class.findMany({
         where: { schoolId },
+        include: {
+          layer: { include: { allowedRooms: { select: { roomId: true } } } },
+          excludingTeachers: { select: { teacherId: true } },
+        },
         orderBy: [{ grade: "asc" }, { name: "asc" }],
       }),
       prisma.subject.findMany({
@@ -76,7 +80,17 @@ export async function loadTimetableData(classId?: string) {
       roomName: s.room?.name,
     })),
     teachers,
-    classes,
+    classes: classes.map((c) => ({
+      id: c.id,
+      name: c.name,
+      grade: c.grade,
+      studentCount: c.studentCount,
+      homeroomTeacherId: c.homeroomTeacherId,
+      layerAllowedRoomIds: c.layer
+        ? c.layer.allowedRooms.map((r) => r.roomId)
+        : null,
+      excludedTeacherIds: c.excludingTeachers.map((e) => e.teacherId),
+    })),
     subjects,
     rooms,
     constraints,

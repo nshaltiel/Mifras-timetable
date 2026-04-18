@@ -80,7 +80,15 @@ function isTeacherFree(
 }
 
 /**
- * Generate ranked substitution suggestions for a single affected period
+ * Generate ranked substitution suggestions for a single affected period.
+ *
+ * Priority order for substitute teachers (all require: free this period + at school today):
+ *   1. Teaches the same subject                 → score 100
+ *   2. Teaches this class (different subject)   → score 80
+ *   3. Generic – at school, no special tie      → score 60
+ *   4. Homeroom teacher of this class           → score 40  (DISTRIBUTE_TO_HOMEROOM)
+ *   5. Self-study                               → score 20
+ *   6. Cancel lesson                            → score 10
  */
 export function generateSuggestions(input: SolverInput): Suggestion[] {
   const suggestions: Suggestion[] = [];
@@ -96,42 +104,58 @@ export function generateSuggestions(input: SolverInput): Suggestion[] {
 
   const absentAndConflict = [...teacherAbsences, input.absenceTeacherId];
 
-  // ── A: Direct Substitute ──────────────────────────────────────────────────
+  const homeroomTeacher = allTeachers.find((t) =>
+    t.homeroomClassIds.includes(affectedSlot.classId)
+  );
+
+  // ── Substitute teachers ───────────────────────────────────────────────────
   for (const teacher of allTeachers) {
     if (teacher.id === input.absenceTeacherId) continue;
     if (!isTeacherFree(teacher.id, day, period, allSlots, absentAndConflict, teacherConstraints))
       continue;
 
-    let score = 45;
-    const reasons: string[] = [];
+    // Only show teachers who are physically at school today
+    const atSchool = allSlots.some((s) => s.teacherId === teacher.id);
+    if (!atSchool) continue;
 
-    // +30 teaches same subject
-    if (teacher.subjectIds.includes(affectedSlot.subjectId)) {
-      score += 30;
-      reasons.push("מלמד את המקצוע");
-    }
-
-    // +15 already has lessons today (in school)
-    const teachesToday = allSlots.some((s) => s.teacherId === teacher.id);
-    if (teachesToday) {
-      score += 15;
-      reasons.push("נמצא בבית הספר היום");
-    }
-
-    // +10 taught this class before (has slots for this class)
-    const knownClass = allSlots.some(
+    const teachesSubject = teacher.subjectIds.includes(affectedSlot.subjectId);
+    const teachesClass = allSlots.some(
       (s) => s.teacherId === teacher.id && s.classId === affectedSlot.classId
     );
-    if (knownClass) {
-      score += 10;
-      reasons.push("מכיר את הכיתה");
+    const isHomeroom = teacher.id === homeroomTeacher?.id;
+
+    let score: number;
+    let reason: string;
+
+    if (teachesSubject) {
+      score = 100;
+      reason = "מלמד את המקצוע";
+    } else if (teachesClass) {
+      score = 80;
+      reason = "מלמד את הכיתה";
+    } else if (isHomeroom) {
+      // Homeroom teacher without subject/class match → supervision role (group 4)
+      score = 40;
+      reason = "מחנך/ת הכיתה";
+      suggestions.push({
+        type: "DISTRIBUTE_TO_HOMEROOM",
+        score,
+        description: `${teacher.name} (מחנך/ת) יקבל/תקבל את הכיתה`,
+        details: {
+          homeroomTeacherId: teacher.id,
+          homeroomTeacherName: teacher.name,
+        },
+      });
+      continue;
+    } else {
+      score = 60;
+      reason = "נמצא בבית הספר היום";
     }
 
-    const reasonStr = reasons.length > 0 ? ` (${reasons.join(", ")})` : "";
     suggestions.push({
       type: "SUBSTITUTE_TEACHER",
       score,
-      description: `${teacher.name} יחליף${reasonStr}`,
+      description: `${teacher.name} יחליף (${reason})`,
       details: {
         substituteTeacherId: teacher.id,
         substituteTeacherName: teacher.name,
@@ -139,76 +163,7 @@ export function generateSuggestions(input: SolverInput): Suggestion[] {
     });
   }
 
-  // ── B: Merge Classes ──────────────────────────────────────────────────────
-  // Find another class in the same period with the same subject and a free teacher
-  const parallelSlots = allSlots.filter(
-    (s) =>
-      s.period === period &&
-      s.subjectId === affectedSlot.subjectId &&
-      s.classId !== affectedSlot.classId &&
-      s.classGrade === affectedSlot.classGrade
-  );
-  for (const parallel of parallelSlots) {
-    suggestions.push({
-      type: "MERGE_CLASSES",
-      score: 58,
-      description: `מיזוג עם ${parallel.className} (${parallel.teacherName} מלמד)`,
-      details: {
-        mergeIntoClassId: parallel.classId,
-        mergeIntoClassName: parallel.className,
-        hostTeacherId: parallel.teacherId,
-        hostTeacherName: parallel.teacherName,
-      },
-    });
-  }
-
-  // ── C: Time Swap ─────────────────────────────────────────────────────────
-  // Find a later period where the class has a lesson whose teacher IS free right now
-  const classOtherSlots = allSlots.filter(
-    (s) => s.classId === affectedSlot.classId && s.period !== period
-  );
-  for (const laterSlot of classOtherSlots) {
-    if (laterSlot.period <= period) continue; // only swap with later lessons
-    const swapTeacher = laterSlot.teacherId;
-    if (
-      isTeacherFree(swapTeacher, day, period, allSlots, absentAndConflict, teacherConstraints)
-    ) {
-      suggestions.push({
-        type: "TIME_SWAP",
-        score: 48,
-        description: `החלפת שיעורים: ${affectedSlot.subjectName} (${period + 1}) ↔ ${laterSlot.subjectName} (${laterSlot.period + 1})`,
-        details: {
-          swapPeriod: laterSlot.period,
-          swapSubjectId: laterSlot.subjectId,
-          swapSubjectName: laterSlot.subjectName,
-          swapTeacherId: swapTeacher,
-          swapTeacherName: laterSlot.teacherName,
-        },
-      });
-      break; // one swap suggestion is enough
-    }
-  }
-
-  // ── D: Distribute to Homeroom ─────────────────────────────────────────────
-  const homeroomTeacher = allTeachers.find((t) =>
-    t.homeroomClassIds.includes(affectedSlot.classId)
-  );
-  if (
-    homeroomTeacher &&
-    isTeacherFree(homeroomTeacher.id, day, period, allSlots, absentAndConflict, teacherConstraints)
-  ) {
-    suggestions.push({
-      type: "DISTRIBUTE_TO_HOMEROOM",
-      score: 30,
-      description: `${homeroomTeacher.name} (מחנך/ת) יקבל/תקבל את הכיתה לשיעור עצמי`,
-      details: {
-        homeroomTeacherId: homeroomTeacher.id,
-        homeroomTeacherName: homeroomTeacher.name,
-      },
-    });
-  }
-
-  // ── E: Self Study ─────────────────────────────────────────────────────────
+  // ── Self Study ────────────────────────────────────────────────────────────
   suggestions.push({
     type: "SELF_STUDY",
     score: 20,
@@ -216,7 +171,7 @@ export function generateSuggestions(input: SolverInput): Suggestion[] {
     details: {},
   });
 
-  // ── F: Cancel Lesson ──────────────────────────────────────────────────────
+  // ── Cancel Lesson ─────────────────────────────────────────────────────────
   suggestions.push({
     type: "CANCEL_LESSON",
     score: 10,
@@ -224,6 +179,5 @@ export function generateSuggestions(input: SolverInput): Suggestion[] {
     details: {},
   });
 
-  // Sort by score descending
   return suggestions.sort((a, b) => b.score - a.score);
 }

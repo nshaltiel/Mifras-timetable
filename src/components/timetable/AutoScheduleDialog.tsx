@@ -4,13 +4,19 @@ import { useState, useTransition, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Wand2, CheckCircle2, AlertTriangle, Loader2, ChevronDown } from "lucide-react";
-import { getClassRequirements, saveClassRequirements, autoScheduleClass } from "@/lib/scheduling-actions";
+import { getClassRequirements, saveClassRequirements, autoScheduleClass, autoScheduleGradeLevelSubjects } from "@/lib/scheduling-actions";
 import { useTimetableStore } from "@/stores/timetable-store";
 import { DAYS_HE, PERIOD_LABELS } from "@/lib/constants";
 import type { TimetableSlot } from "@/stores/timetable-store";
 
-type Subject = { id: string; name: string; color: string | null };
-type ClassInfo = { id: string; name: string; studentCount: number };
+type Subject = { id: string; name: string; color: string | null; category?: string | null };
+type ClassInfo = {
+  id: string;
+  name: string;
+  studentCount: number;
+  grade?: number;
+  homeroomTeacherId?: string | null;
+};
 
 interface AutoScheduleDialogProps {
   classes: ClassInfo[];
@@ -41,6 +47,7 @@ export function AutoScheduleDialog({
   const [classId, setClassId] = useState(selectedClassId ?? classes[0]?.id ?? "");
   const [requirements, setRequirements] = useState<Record<string, number>>({}); // subjectId -> hours
   const [noConsecutiveIds, setNoConsecutiveIds] = useState<Set<string>>(new Set());
+  const [gradeLevelIds, setGradeLevelIds] = useState<Set<string>>(new Set());
   const [dayLastPeriods, setDayLastPeriods] = useState<number[]>(
     Array.from({ length: dayCount }, () => periodCount - 1)
   );
@@ -77,8 +84,18 @@ export function AutoScheduleDialog({
     setPlacedSlots([]);
     setUnplaced([]);
     setNoConsecutiveIds(new Set());
+    setGradeLevelIds(new Set());
     if (selectedClassId) setClassId(selectedClassId);
     setOpen(true);
+  }
+
+  function toggleGradeLevel(subjectId: string) {
+    setGradeLevelIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(subjectId)) next.delete(subjectId);
+      else next.add(subjectId);
+      return next;
+    });
   }
 
   function toggleNoConsecutive(subjectId: string) {
@@ -95,18 +112,30 @@ export function AutoScheduleDialog({
       .map(([subjectId, hoursPerWeek]) => ({ subjectId, hoursPerWeek }))
       .filter((r) => r.hoursPerWeek > 0);
 
+    const gradeLevelSubjectIds = [...gradeLevelIds].filter(id => (requirements[id] ?? 0) > 0);
+    const perClassReqs = reqs.filter(r => !gradeLevelIds.has(r.subjectId));
+
     startSaving(async () => {
       await saveClassRequirements(classId, reqs);
     });
 
     startScheduling(async () => {
       await saveClassRequirements(classId, reqs);
-      const result = await autoScheduleClass(classId, {
-        dayLastPeriods,
-        noConsecutiveSubjectIds: [...noConsecutiveIds],
-      });
-      setPlacedSlots(result.placed);
-      setUnplaced(result.output.unplaced);
+
+      const [perClassResult, gradeLevelResult] = await Promise.all([
+        perClassReqs.length > 0
+          ? autoScheduleClass(classId, { dayLastPeriods, noConsecutiveSubjectIds: [...noConsecutiveIds], gradeLevelSubjectIds })
+          : { placed: [], output: { unplaced: [] } },
+        gradeLevelSubjectIds.length > 0
+          ? autoScheduleGradeLevelSubjects(classId, gradeLevelSubjectIds, { dayLastPeriods, noConsecutiveSubjectIds: [...noConsecutiveIds] })
+          : { placed: [], output: { unplaced: [] } },
+      ]);
+
+      const allPlaced = [...perClassResult.placed, ...gradeLevelResult.placed];
+      const allUnplaced = [...perClassResult.output.unplaced, ...gradeLevelResult.output.unplaced];
+
+      setPlacedSlots(allPlaced);
+      setUnplaced(allUnplaced);
       setStep("results");
     });
   }
@@ -141,6 +170,19 @@ export function AutoScheduleDialog({
   const existingSlotsForClass = slots.filter((s: TimetableSlot) => s.classId === classId).length;
   const totalHours = Object.values(requirements).reduce((a, b) => a + b, 0);
   const days = Array.from({ length: dayCount }, (_, i) => i);
+
+  // Grade-level eligibility: other classes in the same grade
+  const sameGradeClasses = selectedClass?.grade
+    ? classes.filter((c) => c.grade === selectedClass.grade && c.id !== selectedClass.id)
+    : [];
+  const hasGradePeers = sameGradeClasses.length > 0;
+
+  // Homeroom subject check
+  const homeroomSubjectWithHours = subjects.find(
+    (s) => s.category === "homeroom" && (requirements[s.id] ?? 0) > 0
+  );
+  const homeroomTeacherId = selectedClass?.homeroomTeacherId;
+  const homeroomBlocker = homeroomSubjectWithHours && !homeroomTeacherId ? homeroomSubjectWithHours : null;
 
   return (
     <>
@@ -195,56 +237,91 @@ export function AutoScheduleDialog({
                     {subjects.map((subject) => {
                       const hours = requirements[subject.id] ?? 0;
                       const isNoConsec = noConsecutiveIds.has(subject.id);
+                      const isGradeLevel = gradeLevelIds.has(subject.id);
+                      const isHomeroom = subject.category === "homeroom";
                       return (
-                        <div key={subject.id} className="flex items-center justify-between px-3 py-2 gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            {subject.color && (
-                              <span
-                                className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
-                                style={{ backgroundColor: subject.color }}
-                              />
-                            )}
-                            <span className="text-sm truncate">{subject.name}</span>
-                          </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            {/* No-consecutive toggle — only when ≥2 hours */}
-                            {hours >= 2 && (
+                        <div key={subject.id} className="flex flex-col px-3 py-2 gap-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {subject.color && (
+                                <span
+                                  className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: subject.color }}
+                                />
+                              )}
+                              <span className="text-sm truncate">{subject.name}</span>
+                              {isHomeroom && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-mifras-sky-100 text-mifras-navy-700 font-medium border border-mifras-sky-200">
+                                  שעת מחנך
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              {/* Grade-level toggle — only when peers exist and hours > 0 */}
+                              {hasGradePeers && hours > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleGradeLevel(subject.id)}
+                                  title={isGradeLevel ? "ביטול שיבוץ ברמת שכבה" : "שבץ לכל כיתות השכבה"}
+                                  className={`text-[11px] px-1.5 py-0.5 rounded border transition-colors ${
+                                    isGradeLevel
+                                      ? "bg-mifras-gold-50 border-mifras-gold-400 text-amber-700"
+                                      : "border-input text-muted-foreground hover:bg-muted"
+                                  }`}
+                                >
+                                  כל השכבה
+                                </button>
+                              )}
+                              {/* No-consecutive toggle — only when ≥2 hours */}
+                              {hours >= 2 && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleNoConsecutive(subject.id)}
+                                  title={isNoConsec ? "ביטול מניעת שיעורים רצופים" : "מנע שיעורים רצופים"}
+                                  className={`text-xs px-1.5 py-0.5 rounded border transition-colors ${
+                                    isNoConsec
+                                      ? "bg-amber-100 dark:bg-amber-900/40 border-amber-400 text-amber-700 dark:text-amber-300"
+                                      : "border-input text-muted-foreground hover:bg-muted"
+                                  }`}
+                                >
+                                  ≠≠
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                onClick={() => toggleNoConsecutive(subject.id)}
-                                title={isNoConsec ? "ביטול מניעת שיעורים רצופים" : "מנע שיעורים רצופים"}
-                                className={`text-xs px-1.5 py-0.5 rounded border transition-colors ${
-                                  isNoConsec
-                                    ? "bg-amber-100 dark:bg-amber-900/40 border-amber-400 text-amber-700 dark:text-amber-300"
-                                    : "border-input text-muted-foreground hover:bg-muted"
-                                }`}
+                                onClick={() => setRequirements((prev) => ({
+                                  ...prev,
+                                  [subject.id]: Math.max(0, (prev[subject.id] ?? 0) - 1),
+                                }))}
+                                className="w-7 h-7 rounded border border-input hover:bg-muted flex items-center justify-center text-sm font-medium"
                               >
-                                ≠≠
+                                −
                               </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => setRequirements((prev) => ({
-                                ...prev,
-                                [subject.id]: Math.max(0, (prev[subject.id] ?? 0) - 1),
-                              }))}
-                              className="w-7 h-7 rounded border border-input hover:bg-muted flex items-center justify-center text-sm font-medium"
-                            >
-                              −
-                            </button>
-                            <span className="w-7 text-center text-sm font-medium tabular-nums">{hours}</span>
-                            <button
-                              type="button"
-                              onClick={() => setRequirements((prev) => ({
-                                ...prev,
-                                [subject.id]: (prev[subject.id] ?? 0) + 1,
-                              }))}
-                              className="w-7 h-7 rounded border border-input hover:bg-muted flex items-center justify-center text-sm font-medium"
-                            >
-                              +
-                            </button>
-                            <span className="text-xs text-muted-foreground w-8">שע׳</span>
+                              <span className="w-7 text-center text-sm font-medium tabular-nums">{hours}</span>
+                              <button
+                                type="button"
+                                onClick={() => setRequirements((prev) => ({
+                                  ...prev,
+                                  [subject.id]: (prev[subject.id] ?? 0) + 1,
+                                }))}
+                                className="w-7 h-7 rounded border border-input hover:bg-muted flex items-center justify-center text-sm font-medium"
+                              >
+                                +
+                              </button>
+                              <span className="text-xs text-muted-foreground w-8">שע׳</span>
+                            </div>
                           </div>
+                          {/* Homeroom hint */}
+                          {isHomeroom && hours > 0 && homeroomTeacherId && (
+                            <p className="text-[11px] text-mifras-navy-600 bg-mifras-navy-50 rounded px-2 py-0.5">
+                              ✓ שעת מחנך תשובץ עם מחנך/ת הכיתה
+                            </p>
+                          )}
+                          {isHomeroom && hours > 0 && !homeroomTeacherId && (
+                            <p className="text-[11px] text-destructive bg-destructive/10 rounded px-2 py-0.5">
+                              ⚠️ לא הוגדר מחנך לכיתה זו
+                            </p>
+                          )}
                         </div>
                       );
                     })}
@@ -296,10 +373,15 @@ export function AutoScheduleDialog({
                 )}
               </div>
 
+              {homeroomBlocker && (
+                <p className="text-sm text-destructive bg-destructive/10 rounded p-2">
+                  ⚠️ מקצוע &quot;{homeroomBlocker.name}&quot; מוגדר כשעת מחנך אך לכיתה לא הוגדר מחנך. הגדר מחנך לכיתה או הסר שעות ממקצוע זה.
+                </p>
+              )}
               <div className="flex gap-2">
                 <Button
                   onClick={handleSaveAndSchedule}
-                  disabled={totalHours === 0 || isScheduling || isSaving || loadingReqs}
+                  disabled={totalHours === 0 || isScheduling || isSaving || loadingReqs || !!homeroomBlocker}
                   className="gap-2"
                 >
                   {isScheduling ? (
