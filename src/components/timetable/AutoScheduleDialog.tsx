@@ -268,10 +268,10 @@ export function AutoScheduleDialog({
                   <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${showDayLimits ? "rotate-180" : ""}`} />
                 </button>
                 {showDayLimits && (
-                  <div className="p-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <div className="max-h-52 overflow-y-auto divide-y">
                     {days.map((day) => (
-                      <div key={day} className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground w-14 flex-shrink-0">{DAYS_HE[day]}</span>
+                      <div key={day} className="flex items-center gap-3 px-3 py-2">
+                        <span className="text-sm text-muted-foreground w-16 flex-shrink-0">{DAYS_HE[day]}</span>
                         <select
                           value={dayLastPeriods[day]}
                           onChange={(e) => {
@@ -282,11 +282,11 @@ export function AutoScheduleDialog({
                               return next;
                             });
                           }}
-                          className="flex-1 h-8 rounded-md border border-input bg-transparent px-2 text-xs"
+                          className="flex-1 h-8 rounded-md border border-input bg-transparent px-2 text-sm"
                         >
                           {Array.from({ length: periodCount }, (_, i) => (
                             <option key={i} value={i}>
-                              {periodTimes[i]?.end ? `שע׳ ${i + 1} (עד ${periodTimes[i].end})` : `שיעור ${i + 1}`}
+                              {periodTimes[i]?.end ? `שיעור ${i + 1} (עד ${periodTimes[i].end})` : `שיעור ${i + 1}`}
                             </option>
                           ))}
                         </select>
