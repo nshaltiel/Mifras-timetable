@@ -7,7 +7,7 @@ export default async function SettingsPage() {
   const session = await auth();
   const schoolId = (session?.user as Record<string, unknown>)?.schoolId as string;
 
-  const [teachers, classes, rooms, subjects, studyGroups, school, users] = await Promise.all([
+  const [teachers, classes, rooms, subjects, studyGroups, school, users, events] = await Promise.all([
     prisma.teacher.findMany({
       where: { schoolId },
       include: {
@@ -44,6 +44,14 @@ export default async function SettingsPage() {
     }),
     prisma.school.findUnique({ where: { id: schoolId } }),
     prisma.user.findMany({ where: { schoolId }, orderBy: { createdAt: "asc" } }),
+    prisma.event.findMany({
+      where: { schoolId },
+      include: {
+        participatingClasses: { include: { class: { select: { id: true, name: true } } } },
+        participatingTeachers: { include: { teacher: { select: { id: true, name: true } } } },
+      },
+      orderBy: { startAt: "desc" },
+    }),
   ]);
 
   const gradeOptions = [...new Set(classes.map((c) => c.grade))]
@@ -60,6 +68,7 @@ export default async function SettingsPage() {
       school={school}
       users={users}
       gradeOptions={gradeOptions}
+      events={events}
     />
   );
 }

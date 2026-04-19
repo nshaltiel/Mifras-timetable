@@ -31,6 +31,7 @@ model School {
   constraints    SchoolConstraint[]
   layers         Layer[]
   roomCategories RoomCategory[]
+  events         Event[]
 }
 
 model User {
@@ -65,6 +66,7 @@ model Teacher {
   homeroomClass   Class?               @relation("HomeRoom")
   substitutions   Substitution[]       @relation("SubstituteTeacher")
   excludedClasses TeacherExcludedClass[]
+  events          EventTeacher[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -89,6 +91,7 @@ model Class {
   mergedInto        Substitution[]           @relation("MergedClass")
   requirements      ClassSubjectRequirement[]
   excludingTeachers TeacherExcludedClass[]
+  events            EventClass[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -250,12 +253,56 @@ model Absence {
   note      String?
   status    String  @default("UNRESOLVED")
 
+  eventId String?
+  event   Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
   substitutions Substitution[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([teacherId, date])
+}
+
+// ──────────────────────────────────────
+// School Events (trips, ceremonies, sports days, etc.)
+// ──────────────────────────────────────
+
+model Event {
+  id          String   @id @default(cuid())
+  schoolId    String
+  school      School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  eventType   String?
+  startAt     DateTime
+  endAt       DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  participatingClasses  EventClass[]
+  participatingTeachers EventTeacher[]
+  absences              Absence[]
+
+  @@index([schoolId, startAt])
+}
+
+model EventClass {
+  eventId String
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  classId String
+  class   Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, classId])
+}
+
+model EventTeacher {
+  eventId   String
+  event     Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  teacherId String
+  teacher   Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, teacherId])
 }
 
 model SuperAdmin {

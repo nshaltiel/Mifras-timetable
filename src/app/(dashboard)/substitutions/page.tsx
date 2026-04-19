@@ -52,6 +52,7 @@ export default async function SubstitutionsPage() {
       where: { date: today, teacher: { schoolId }, status: { not: "NOT_REQUIRED" } },
       include: {
         teacher: { select: { id: true, name: true } },
+        event: { select: { id: true, name: true } },
         substitutions: {
           include: { substituteTeacher: { select: { name: true } } },
         },
@@ -158,7 +159,14 @@ export default async function SubstitutionsPage() {
                         <td className="px-4 py-3 font-semibold text-mifras-navy-700">
                           {PERIOD_LABELS[p] || `ש' ${p + 1}`}
                         </td>
-                        <td className="px-4 py-3">{absence.teacher.name}</td>
+                        <td className="px-4 py-3">
+                          {absence.teacher.name}
+                          {absence.event && (
+                            <span className="ms-1 inline-block text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                              {absence.event.name}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 font-medium">{slot?.className ?? "—"}</td>
                         <td className="px-4 py-3 text-mifras-ink-500">{slot?.roomName ?? "—"}</td>
                         <td className="px-4 py-3">

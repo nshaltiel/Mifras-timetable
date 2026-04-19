@@ -34,6 +34,8 @@ import {
 import { createStudyGroup, deleteStudyGroup } from "@/lib/study-group-actions";
 import { updateStudyGroup } from "@/lib/scheduling-actions";
 import { addSchoolUser, removeSchoolUser, updateSchoolName, resetUserPasswordByAdmin, changeOwnPassword } from "@/lib/user-actions";
+import { createEvent, updateEvent, deleteEvent } from "@/lib/event-actions";
+import { EVENT_TYPE_HE, eventStatus } from "@/lib/event-helpers";
 import { ROOM_TYPE_HE, SUBJECT_CATEGORY_HE, GRADE_HE } from "@/lib/constants";
 import { TeacherConstraintGrid } from "@/components/settings/TeacherConstraintGrid";
 import { type ConstraintType } from "@/lib/constraint-types";
@@ -69,6 +71,16 @@ type StudyGroup = {
 };
 type School = { id: string; name: string; periodCount: number; dayCount: number; periodTimes: string | null } | null;
 type User = { id: string; name: string; email: string; role: string; createdAt: Date };
+type EventRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  eventType: string | null;
+  startAt: Date;
+  endAt: Date;
+  participatingClasses: { class: { id: string; name: string } }[];
+  participatingTeachers: { teacher: { id: string; name: string } }[];
+};
 
 interface Props {
   teachers: Teacher[];
@@ -79,6 +91,7 @@ interface Props {
   school: School;
   users: User[];
   gradeOptions: GradeOption[];
+  events: EventRow[];
 }
 
 // ─── Helper: Simple CRUD Dialog ───────────────────────────────────────────────
@@ -910,6 +923,346 @@ function StudyGroupsTab({ studyGroups, teachers, classes, subjects }: {
   );
 }
 
+// ─── Events Tab ───────────────────────────────────────────────────────────────
+
+function toDatetimeLocal(d: Date | string): string {
+  const date = typeof d === "string" ? new Date(d) : d;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatEventRange(start: Date, end: Date): string {
+  const sameDay =
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth() &&
+    start.getDate() === end.getDate();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dateFmt = (d: Date) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  const timeFmt = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (sameDay) return `${dateFmt(start)}  ${timeFmt(start)}–${timeFmt(end)}`;
+  return `${dateFmt(start)} ${timeFmt(start)} – ${dateFmt(end)} ${timeFmt(end)}`;
+}
+
+function EventDialog({
+  mode,
+  event,
+  classes,
+  teachers,
+  onDone,
+}: {
+  mode: "create" | "edit";
+  event?: EventRow;
+  classes: Class[];
+  teachers: Teacher[];
+  onDone: () => void;
+}) {
+  const now = new Date();
+  const defaultStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 0);
+  const defaultEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 0);
+
+  const [open, setOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [teacherSearch, setTeacherSearch] = useState("");
+
+  const initialClassIds = new Set(event?.participatingClasses.map((c) => c.class.id) ?? []);
+  const initialTeacherIds = new Set(event?.participatingTeachers.map((t) => t.teacher.id) ?? []);
+  const [selectedClasses, setSelectedClasses] = useState<Set<string>>(initialClassIds);
+  const [selectedTeachers, setSelectedTeachers] = useState<Set<string>>(initialTeacherIds);
+
+  function reset() {
+    setSelectedClasses(new Set(event?.participatingClasses.map((c) => c.class.id) ?? []));
+    setSelectedTeachers(new Set(event?.participatingTeachers.map((t) => t.teacher.id) ?? []));
+    setTeacherSearch("");
+  }
+
+  function handleSubmit(fd: FormData) {
+    // Replace form's class/teacher ids with current selection
+    fd.delete("classIds");
+    fd.delete("teacherIds");
+    selectedClasses.forEach((id) => fd.append("classIds", id));
+    selectedTeachers.forEach((id) => fd.append("teacherIds", id));
+
+    startTransition(async () => {
+      try {
+        if (mode === "edit" && event) {
+          await updateEvent(event.id, fd);
+        } else {
+          await createEvent(fd);
+        }
+        toast.success("האירוע נשמר");
+        setOpen(false);
+        onDone();
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : "שגיאה בשמירה");
+      }
+    });
+  }
+
+  // Group classes by grade
+  const classesByGrade = [...classes]
+    .sort((a, b) => a.grade - b.grade || a.name.localeCompare(b.name, "he"))
+    .reduce<Record<number, Class[]>>((acc, c) => {
+      (acc[c.grade] ||= []).push(c);
+      return acc;
+    }, {});
+
+  const filteredTeachers = teachers.filter((t) =>
+    teacherSearch.trim() === "" ? true : t.name.includes(teacherSearch.trim()),
+  );
+
+  return (
+    <>
+      {mode === "create" ? (
+        <Button onClick={() => { reset(); setOpen(true); }}>
+          <Plus className="h-4 w-4" /> אירוע חדש
+        </Button>
+      ) : (
+        <Button size="sm" variant="outline" onClick={() => { reset(); setOpen(true); }}>
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+      )}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{mode === "create" ? "אירוע חדש" : "עריכת אירוע"}</DialogTitle>
+          </DialogHeader>
+          <form action={handleSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="name">שם האירוע</Label>
+              <Input id="name" name="name" required defaultValue={event?.name ?? ""} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="eventType">סוג</Label>
+                <select
+                  id="eventType"
+                  name="eventType"
+                  defaultValue={event?.eventType ?? ""}
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">—</option>
+                  {Object.entries(EVENT_TYPE_HE).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label htmlFor="description">תיאור (אופציונלי)</Label>
+                <Input id="description" name="description" defaultValue={event?.description ?? ""} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="startAt">תאריך + שעת התחלה</Label>
+                <Input
+                  id="startAt"
+                  name="startAt"
+                  type="datetime-local"
+                  required
+                  defaultValue={toDatetimeLocal(event?.startAt ?? defaultStart)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="endAt">תאריך + שעת סיום</Label>
+                <Input
+                  id="endAt"
+                  name="endAt"
+                  type="datetime-local"
+                  required
+                  defaultValue={toDatetimeLocal(event?.endAt ?? defaultEnd)}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label>כיתות משתתפות</Label>
+                <span className="text-xs text-muted-foreground">{selectedClasses.size} נבחרו</span>
+              </div>
+              <div className="rounded-md border p-3 space-y-3 max-h-56 overflow-y-auto">
+                {Object.keys(classesByGrade).length === 0 && (
+                  <p className="text-sm text-muted-foreground">אין כיתות</p>
+                )}
+                {Object.entries(classesByGrade).map(([grade, list]) => (
+                  <div key={grade}>
+                    <div className="text-xs font-medium text-muted-foreground mb-1">
+                      שכבה {GRADE_HE[Number(grade)] ?? grade}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {list.map((c) => {
+                        const checked = selectedClasses.has(c.id);
+                        return (
+                          <label
+                            key={c.id}
+                            className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm cursor-pointer ${
+                              checked ? "bg-primary/10 border-primary" : "bg-background"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5"
+                              checked={checked}
+                              onChange={() => {
+                                setSelectedClasses((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(c.id)) next.delete(c.id);
+                                  else next.add(c.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                            {c.name}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label>מורים משתתפים באירוע (שייעדרו מכל שיעוריהם)</Label>
+                <span className="text-xs text-muted-foreground">{selectedTeachers.size} נבחרו</span>
+              </div>
+              <Input
+                placeholder="חיפוש מורה..."
+                value={teacherSearch}
+                onChange={(e) => setTeacherSearch(e.target.value)}
+                className="mb-2"
+              />
+              <div className="rounded-md border p-3 max-h-56 overflow-y-auto">
+                {filteredTeachers.length === 0 && (
+                  <p className="text-sm text-muted-foreground">אין מורים</p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {filteredTeachers.map((t) => {
+                    const checked = selectedTeachers.has(t.id);
+                    return (
+                      <label
+                        key={t.id}
+                        className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm cursor-pointer ${
+                          checked ? "bg-primary/10 border-primary" : "bg-background"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5"
+                          checked={checked}
+                          onChange={() => {
+                            setSelectedTeachers((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(t.id)) next.delete(t.id);
+                              else next.add(t.id);
+                              return next;
+                            });
+                          }}
+                        />
+                        {t.name}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                מורים של הכיתות המשתתפות שלא מסומנים כאן יישארו בבית הספר וזמינים למילוי מקום.
+              </p>
+            </div>
+
+            <div className="flex gap-2 sticky bottom-0 bg-background pt-2 pb-1">
+              <Button type="submit" disabled={isPending}>{isPending ? "שומר..." : "שמירה"}</Button>
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>ביטול</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function EventsTab({ events, classes, teachers }: {
+  events: EventRow[]; classes: Class[]; teachers: Teacher[];
+}) {
+  const router = useRouter();
+
+  async function handleDelete(id: string) {
+    await deleteEvent(id);
+    router.refresh();
+  }
+
+  const statusHe: Record<string, string> = {
+    upcoming: "עתידי",
+    active: "פעיל",
+    past: "הסתיים",
+  };
+  const statusClass: Record<string, string> = {
+    upcoming: "bg-blue-100 text-blue-700",
+    active: "bg-green-100 text-green-700",
+    past: "bg-gray-100 text-gray-600",
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <EventDialog mode="create" classes={classes} teachers={teachers} onDone={() => router.refresh()} />
+      </div>
+      <div className="rounded-lg border overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>שם</TableHead>
+              <TableHead>סוג</TableHead>
+              <TableHead>תאריכים</TableHead>
+              <TableHead className="w-20">כיתות</TableHead>
+              <TableHead className="w-20">מורים</TableHead>
+              <TableHead className="w-24">סטטוס</TableHead>
+              <TableHead className="w-24">פעולות</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {events.length === 0 ? (
+              <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">אין אירועים</TableCell></TableRow>
+            ) : events.map(ev => {
+              const status = eventStatus(new Date(ev.startAt), new Date(ev.endAt));
+              return (
+                <TableRow key={ev.id}>
+                  <TableCell className="font-medium">{ev.name}</TableCell>
+                  <TableCell className="text-sm">
+                    {ev.eventType ? EVENT_TYPE_HE[ev.eventType] ?? ev.eventType : ""}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {formatEventRange(new Date(ev.startAt), new Date(ev.endAt))}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs">{ev.participatingClasses.length}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs">{ev.participatingTeachers.length}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <span className={`inline-block text-xs px-2 py-0.5 rounded ${statusClass[status]}`}>
+                      {statusHe[status]}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <EventDialog mode="edit" event={ev} classes={classes} teachers={teachers} onDone={() => router.refresh()} />
+                      <DeleteButton action={() => handleDelete(ev.id)} entityName={ev.name} />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Period Times Tab ─────────────────────────────────────────────────────────
 
 function PeriodTimesTab({ school }: { school: School }) {
@@ -1174,13 +1527,14 @@ const TABS = [
   { id: "rooms", label: "חדרים" },
   { id: "subjects", label: "מקצועות" },
   { id: "study-groups", label: "קבוצות לימוד" },
+  { id: "events", label: "אירועים" },
   { id: "period-times", label: "שעות שיעורים" },
   { id: "users", label: "משתמשים" },
 ] as const;
 
 type TabId = typeof TABS[number]["id"];
 
-export function SettingsClient({ teachers, classes, rooms, subjects, studyGroups, school, users, gradeOptions }: Props) {
+export function SettingsClient({ teachers, classes, rooms, subjects, studyGroups, school, users, gradeOptions, events }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>("teachers");
   const router = useRouter();
   const [isPendingName, startNameTransition] = useTransition();
@@ -1248,6 +1602,7 @@ export function SettingsClient({ teachers, classes, rooms, subjects, studyGroups
         {activeTab === "rooms" && <RoomsTab rooms={rooms} gradeOptions={gradeOptions} />}
         {activeTab === "subjects" && <SubjectsTab subjects={subjects} />}
         {activeTab === "study-groups" && <StudyGroupsTab studyGroups={studyGroups} teachers={teachers} classes={classes} subjects={subjects} />}
+        {activeTab === "events" && <EventsTab events={events} classes={classes} teachers={teachers} />}
         {activeTab === "period-times" && <PeriodTimesTab school={school} />}
         {activeTab === "users" && <UsersTab users={users} />}
       </div>
