@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
 import {
   Dialog,
   DialogContent,
@@ -78,6 +78,12 @@ export function AddLessonDialog({
   const [day, setDay] = useState(editingSlot?.day ?? defaultDay ?? 0);
   const [period, setPeriod] = useState(editingSlot?.period ?? defaultPeriod ?? 0);
   const [conflictMsg, setConflictMsg] = useState("");
+  const [applyToAllGrade, setApplyToAllGrade] = useState(false);
+
+  // Additional study groups at the same (day, period)
+  type ExtraGroup = { key: string; classId: string; studyGroupId: string };
+  const extraKeyBase = useId();
+  const [extraGroups, setExtraGroups] = useState<ExtraGroup[]>([]);
 
   const isOpen = forceOpen || open;
 
@@ -91,10 +97,13 @@ export function AddLessonDialog({
 
   const selectedClass = classes.find((c) => c.id === classId);
 
-  // Rooms already occupied at the selected day+period
+  // Rooms already occupied at the selected day+period (exclude same study group — they share a room)
   const occupiedRoomIds = new Set(
     otherSlots
-      .filter((s: TimetableSlot) => s.day === day && s.period === period && s.roomId)
+      .filter((s: TimetableSlot) =>
+        s.day === day && s.period === period && s.roomId &&
+        !(studyGroupId && s.studyGroupId === studyGroupId)
+      )
       .map((s: TimetableSlot) => s.roomId as string)
   );
 
@@ -118,7 +127,10 @@ export function AddLessonDialog({
     : teachers;
   const teacherOptionsWithStatus = teacherOptionsForSubject.map((t) => {
     const free = isTeacherFree(t.id, day, period, otherSlots, hardConstraints.map((c) => ({ ...c, day: c.day ?? undefined, period: c.period ?? undefined })));
-    const booked = otherSlots.some((s: TimetableSlot) => s.teacherId === t.id && s.day === day && s.period === period);
+    const booked = otherSlots.some((s: TimetableSlot) =>
+      s.teacherId === t.id && s.day === day && s.period === period &&
+      !(studyGroupId && s.studyGroupId === studyGroupId)
+    );
     const blocked = hardConstraints.some((c) => c.teacherId === t.id && (c.day == null || c.day === day) && (c.period == null || c.period === period));
     const excluded = excludedTeacherIds.has(t.id);
     const reason = booked ? " — משובץ כבר" : blocked ? " — אילוץ" : excluded ? " — לא מורשה לכיתה" : "";
@@ -188,10 +200,9 @@ export function AddLessonDialog({
       removeSlot(editingSlot.day, editingSlot.period, editingSlot.classId);
     }
 
-    const conflicts = addSlot({
+    const slotBase = {
       day,
       period,
-      classId,
       teacherId,
       subjectId,
       roomId: roomId || null,
@@ -199,16 +210,56 @@ export function AddLessonDialog({
       subjectName: subject.name,
       subjectColor: subject.color || "#4d90fe",
       teacherName: teacher.name,
-      className: cls.name,
       roomName: room?.name,
-    });
+    };
 
-    if (conflicts.length > 0) {
+    // Build list of classes to add slots for
+    const classTargets: { classId: string; className: string }[] =
+      applyToAllGrade && selectedStudyGroup && selectedStudyGroup.classes.length > 1
+        ? selectedStudyGroup.classes.map((c) => {
+            const fullClass = classes.find((x) => x.id === c.classId);
+            return { classId: c.classId, className: fullClass?.name ?? c.classId };
+          })
+        : [{ classId, className: cls.name }];
+
+    const allConflictMsgs: string[] = [];
+    for (const target of classTargets) {
+      const conflicts = addSlot({ ...slotBase, classId: target.classId, className: target.className });
+      if (conflicts.length > 0) {
+        allConflictMsgs.push(...conflicts.map((c) => c.message));
+      }
+    }
+
+    // Place extra study groups (same day/period, different class+studyGroup)
+    for (const eg of extraGroups) {
+      if (!eg.classId || !eg.studyGroupId) continue;
+      const egGroup = studyGroups.find((g) => g.id === eg.studyGroupId);
+      const egClass = classes.find((c) => c.id === eg.classId);
+      if (!egGroup || !egClass) continue;
+      const egConflicts = addSlot({
+        day,
+        period,
+        classId: eg.classId,
+        className: egClass.name,
+        teacherId: egGroup.teacher.id,
+        teacherName: egGroup.teacher.name,
+        subjectId: egGroup.subjectId,
+        subjectName: egGroup.subject.name,
+        subjectColor: egGroup.subject.color || "#4d90fe",
+        roomId: null,
+        studyGroupId: eg.studyGroupId,
+      });
+      if (egConflicts.length > 0) {
+        allConflictMsgs.push(...egConflicts.map((c) => c.message));
+      }
+    }
+
+    if (allConflictMsgs.length > 0) {
       // If we removed old slot and got conflict, restore it
       if (isEditing && editingSlot) {
         addSlot(editingSlot);
       }
-      setConflictMsg(conflicts.map((c) => c.message).join(", "));
+      setConflictMsg([...new Set(allConflictMsgs)].join(" | "));
     } else {
       setConflictMsg("");
       if (forceOpen && onClose) {
@@ -220,6 +271,8 @@ export function AddLessonDialog({
   }
 
   function handleClose() {
+    setExtraGroups([]);
+    setConflictMsg("");
     if (forceOpen && onClose) {
       onClose();
     } else {
@@ -306,6 +359,8 @@ export function AddLessonDialog({
                 onChange={(e) => {
                   const gId = e.target.value;
                   setStudyGroupId(gId);
+                  setApplyToAllGrade(false);
+                  setExtraGroups([]);
                   if (gId) {
                     const g = relevantStudyGroups.find((x) => x.id === gId);
                     if (g) setTeacherId(g.teacher.id);
@@ -320,6 +375,83 @@ export function AddLessonDialog({
                   </option>
                 ))}
               </select>
+              {selectedStudyGroup && selectedStudyGroup.classes.length > 1 && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer select-none pt-1">
+                  <input
+                    type="checkbox"
+                    checked={applyToAllGrade}
+                    onChange={(e) => setApplyToAllGrade(e.target.checked)}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  <span>
+                    החל על כל כיתות הקבוצה ({selectedStudyGroup.classes.length} כיתות)
+                  </span>
+                </label>
+              )}
+
+              {/* Additional study groups at the same time slot */}
+              {selectedStudyGroup && !isEditing && (
+                <div className="mt-2 space-y-1.5">
+                  {extraGroups.map((eg, idx) => {
+                    const availClasses = classes.filter(
+                      (c) => c.id !== classId && !extraGroups.some((x, i) => i !== idx && x.classId === c.id)
+                    );
+                    const egStudyGroups = subjectId
+                      ? studyGroups.filter(
+                          (g) => g.subjectId === subjectId && g.classes.some((c) => c.classId === eg.classId)
+                        )
+                      : [];
+                    return (
+                      <div key={eg.key} className="flex gap-1.5 items-center">
+                        <select
+                          value={eg.classId}
+                          onChange={(e) => setExtraGroups((prev) =>
+                            prev.map((x, i) => i === idx ? { ...x, classId: e.target.value, studyGroupId: "" } : x)
+                          )}
+                          className="flex-1 h-8 rounded-md border border-input bg-transparent px-2 text-xs"
+                        >
+                          <option value="">כיתה</option>
+                          {availClasses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                        <select
+                          value={eg.studyGroupId}
+                          onChange={(e) => {
+                            const gId = e.target.value;
+                            setExtraGroups((prev) =>
+                              prev.map((x, i) => i === idx ? { ...x, studyGroupId: gId } : x)
+                            );
+                          }}
+                          className="flex-1 h-8 rounded-md border border-input bg-transparent px-2 text-xs"
+                        >
+                          <option value="">קבוצה</option>
+                          {egStudyGroups.map((g) => (
+                            <option key={g.id} value={g.id}>
+                              {g.name}{g.level ? ` (${g.level})` : ""} — {g.teacher.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setExtraGroups((prev) => prev.filter((_, i) => i !== idx))}
+                          className="text-muted-foreground hover:text-destructive w-6 h-6 flex items-center justify-center rounded hover:bg-destructive/10 text-sm flex-shrink-0"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setExtraGroups((prev) => [
+                      ...prev,
+                      { key: `${extraKeyBase}-${prev.length}`, classId: "", studyGroupId: "" },
+                    ])}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    + הוסף קבוצת לימוד נוספת על אותה שעה
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

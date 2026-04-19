@@ -359,6 +359,7 @@ export function TimetableClient({
               <AutoScheduleDialog
                 classes={classes}
                 subjects={subjects}
+                studyGroups={studyGroups}
                 selectedClassId={selectedClassId}
                 periodCount={periodCount}
                 dayCount={dayCount}

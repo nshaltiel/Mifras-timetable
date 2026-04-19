@@ -17,10 +17,12 @@ type ClassInfo = {
   grade?: number;
   homeroomTeacherId?: string | null;
 };
+type StudyGroupInfo = { subjectId: string; classes: { classId: string }[] };
 
 interface AutoScheduleDialogProps {
   classes: ClassInfo[];
   subjects: Subject[];
+  studyGroups?: StudyGroupInfo[];
   selectedClassId?: string | null;
   periodCount: number;
   dayCount: number;
@@ -37,6 +39,7 @@ type PlacedSlot = {
 export function AutoScheduleDialog({
   classes,
   subjects,
+  studyGroups = [],
   selectedClassId,
   periodCount,
   dayCount,
@@ -84,7 +87,23 @@ export function AutoScheduleDialog({
     setPlacedSlots([]);
     setUnplaced([]);
     setNoConsecutiveIds(new Set());
-    setGradeLevelIds(new Set());
+
+    const activeClassId = selectedClassId ?? classId;
+    const activeClass = classes.find((c) => c.id === activeClassId);
+    const grade = activeClass?.grade;
+
+    // Auto-select grade-level for subjects that have study groups in this class's grade
+    const autoGradeLevel = new Set<string>();
+    if (grade !== undefined) {
+      const gradeClassIds = new Set(classes.filter((c) => c.grade === grade).map((c) => c.id));
+      for (const sg of studyGroups) {
+        if (sg.classes.some((c) => gradeClassIds.has(c.classId))) {
+          autoGradeLevel.add(sg.subjectId);
+        }
+      }
+    }
+    setGradeLevelIds(autoGradeLevel);
+
     if (selectedClassId) setClassId(selectedClassId);
     setOpen(true);
   }

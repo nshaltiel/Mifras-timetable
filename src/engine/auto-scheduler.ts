@@ -42,6 +42,7 @@ export interface ExistingSlot {
   classId: string;
   teacherId: string;
   roomId?: string | null;
+  studyGroupId?: string | null;
 }
 
 export interface RoomOption {
@@ -223,9 +224,17 @@ export function runAutoScheduler(input: SchedulerInput): SchedulerOutput {
   const placed: SchedulerSlot[] = [];
   const unplaced: SchedulerOutput["unplaced"] = [];
 
-  // Pre-count existing hours per teacher across the whole school schedule
+  // Pre-count existing hours per teacher across the whole school schedule.
+  // Study group slots are deduplicated: if the same teacher teaches the same group at the same
+  // (day, period) for multiple classes, it counts as one session, not one per class.
   const teacherHoursUsed = new Map<string, number>();
+  const seenSgSlots = new Set<string>();
   for (const s of input.existingSlots) {
+    if (s.studyGroupId) {
+      const key = `${s.teacherId}:${s.studyGroupId}:${s.day}:${s.period}`;
+      if (seenSgSlots.has(key)) continue;
+      seenSgSlots.add(key);
+    }
     teacherHoursUsed.set(s.teacherId, (teacherHoursUsed.get(s.teacherId) ?? 0) + 1);
   }
 
@@ -433,27 +442,39 @@ export function runGradeLevelScheduler(input: GradeLevelInput): SchedulerOutput 
     dayCount, periodCount,
   } = input;
 
-  // Validate: teachers must be distinct
-  const teacherIds = assignments.map((a) => a.teacherId);
-  const uniqueTeacherIds = new Set(teacherIds);
-  if (uniqueTeacherIds.size < teacherIds.length) {
-    return {
-      placed: [],
-      unplaced: [{
-        subjectName,
-        remaining: hoursPerWeek,
-        reason: "שיעור ברמת שכבה דורש מורה נפרד/ת לכל כיתה — נמצאו מורים כפולים",
-      }],
-    };
+  // Validate: same teacher must not appear in two different study groups
+  const teacherToStudyGroup = new Map<string, string | null>();
+  for (const a of assignments) {
+    const existing = teacherToStudyGroup.get(a.teacherId);
+    if (existing !== undefined) {
+      const isSameGroup = a.studyGroupId !== null && a.studyGroupId === existing;
+      if (!isSameGroup) {
+        return {
+          placed: [],
+          unplaced: [{
+            subjectName,
+            remaining: hoursPerWeek,
+            reason: "מורה מוגדר/ת ביותר מקבוצת לימוד אחת לאותו מקצוע — לא ניתן לשבץ",
+          }],
+        };
+      }
+    }
+    teacherToStudyGroup.set(a.teacherId, a.studyGroupId ?? null);
   }
 
   const slots: ExistingSlot[] = [...input.existingSlots];
   const placed: SchedulerSlot[] = [];
   const unplaced: SchedulerOutput["unplaced"] = [];
 
-  // Pre-count used hours per teacher
+  // Pre-count used hours per teacher; deduplicate study group slots (one session = one hour)
   const teacherHoursUsed = new Map<string, number>();
+  const seenSgSlots = new Set<string>();
   for (const s of input.existingSlots) {
+    if (s.studyGroupId) {
+      const key = `${s.teacherId}:${s.studyGroupId}:${s.day}:${s.period}`;
+      if (seenSgSlots.has(key)) continue;
+      seenSgSlots.add(key);
+    }
     teacherHoursUsed.set(s.teacherId, (teacherHoursUsed.get(s.teacherId) ?? 0) + 1);
   }
 
@@ -514,9 +535,26 @@ export function runGradeLevelScheduler(input: GradeLevelInput): SchedulerOutput 
     candidates.sort((a, b) => a.score - b.score);
     const best = candidates[0];
 
-    // Place one slot per assignment at the chosen (day, period)
+    // Place one slot per assignment at the chosen (day, period).
+    // Classes in the same study group share a room and count as one teacher-hour.
+    const sgStudentCount = new Map<string, number>();
     for (const a of assignments) {
-      const room = findRoom(a.studentCount, best.day, best.period, slots, rooms, a.allowedRoomIds);
+      if (a.studyGroupId) {
+        sgStudentCount.set(a.studyGroupId, (sgStudentCount.get(a.studyGroupId) ?? 0) + a.studentCount);
+      }
+    }
+    const studyGroupRoomMap = new Map<string, RoomOption | null>();
+    const incrementedTeachers = new Set<string>();
+
+    for (const a of assignments) {
+      let room: RoomOption | null;
+      if (a.studyGroupId && studyGroupRoomMap.has(a.studyGroupId)) {
+        room = studyGroupRoomMap.get(a.studyGroupId)!;
+      } else {
+        const count = a.studyGroupId ? (sgStudentCount.get(a.studyGroupId) ?? a.studentCount) : a.studentCount;
+        room = findRoom(count, best.day, best.period, slots, rooms, a.allowedRoomIds);
+        if (a.studyGroupId) studyGroupRoomMap.set(a.studyGroupId, room);
+      }
 
       const newSlot: ExistingSlot = {
         day: best.day,
@@ -524,9 +562,15 @@ export function runGradeLevelScheduler(input: GradeLevelInput): SchedulerOutput 
         classId: a.classId,
         teacherId: a.teacherId,
         roomId: room?.id ?? null,
+        studyGroupId: a.studyGroupId,
       };
       slots.push(newSlot);
-      teacherHoursUsed.set(a.teacherId, (teacherHoursUsed.get(a.teacherId) ?? 0) + 1);
+
+      const dedupeKey = a.studyGroupId ? `${a.teacherId}:${a.studyGroupId}` : a.teacherId;
+      if (!incrementedTeachers.has(dedupeKey)) {
+        incrementedTeachers.add(dedupeKey);
+        teacherHoursUsed.set(a.teacherId, (teacherHoursUsed.get(a.teacherId) ?? 0) + 1);
+      }
 
       placed.push({
         day: best.day,

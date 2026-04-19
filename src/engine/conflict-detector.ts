@@ -60,8 +60,12 @@ export function detectConflicts(
     const sameTime = existing.day === proposed.day && existing.period === proposed.period;
     if (!sameTime) continue;
 
+    // Study group: same teacher + same room in the same group = one shared session, not a conflict
+    const sharedStudyGroup =
+      proposed.studyGroupId != null && proposed.studyGroupId === existing.studyGroupId;
+
     // Teacher double-booked
-    if (existing.teacherId === proposed.teacherId) {
+    if (existing.teacherId === proposed.teacherId && !sharedStudyGroup) {
       conflicts.push({
         type: "TEACHER_DOUBLE_BOOKED",
         message: `המורה כבר מלמד/ת בשעה זו`,
@@ -84,7 +88,8 @@ export function detectConflicts(
     if (
       proposed.roomId &&
       existing.roomId &&
-      existing.roomId === proposed.roomId
+      existing.roomId === proposed.roomId &&
+      !sharedStudyGroup
     ) {
       conflicts.push({
         type: "ROOM_DOUBLE_BOOKED",

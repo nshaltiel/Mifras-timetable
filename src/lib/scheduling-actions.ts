@@ -87,7 +87,7 @@ export async function autoScheduleClass(
       }),
       prisma.timetableSlot.findMany({
         where: { class: { schoolId } },
-        select: { day: true, period: true, classId: true, teacherId: true, roomId: true },
+        select: { day: true, period: true, classId: true, teacherId: true, roomId: true, studyGroupId: true },
       }),
       prisma.teacher.findMany({
         where: { schoolId },
@@ -141,6 +141,16 @@ export async function autoScheduleClass(
       const preferred = subjectTeachers.find((t) => t.id === sg.teacherId);
       if (preferred) {
         candidateTeachers = [preferred, ...subjectTeachers.filter((t) => t.id !== preferred.id)];
+      }
+    }
+    // For homeroom subjects, always include the homeroom teacher even if they lack the subject in their subjects list
+    if (isHomeroom && homeroomTeacherId && !candidateTeachers.some((t) => t.id === homeroomTeacherId)) {
+      const homeroomTeacher = teachers.find((t) => t.id === homeroomTeacherId);
+      if (homeroomTeacher) {
+        candidateTeachers = [
+          { id: homeroomTeacher.id, name: homeroomTeacher.name, maxHoursPerWeek: homeroomTeacher.maxHoursPerWeek ?? null },
+          ...candidateTeachers,
+        ];
       }
     }
 
@@ -227,7 +237,7 @@ export async function autoScheduleGradeLevelSubjects(
   const [existingSlots, rooms, constraints, teachers, studyGroups, school] = await Promise.all([
     prisma.timetableSlot.findMany({
       where: { class: { schoolId } },
-      select: { day: true, period: true, classId: true, teacherId: true, roomId: true },
+      select: { day: true, period: true, classId: true, teacherId: true, roomId: true, studyGroupId: true },
     }),
     prisma.room.findMany({ where: { schoolId } }),
     prisma.teacherConstraint.findMany({ where: { teacher: { schoolId } } }),
@@ -316,7 +326,7 @@ export async function autoScheduleGradeLevelSubjects(
     existingSlotsFormatted.push(
       ...gradeOutput.placed.map((p) => ({
         day: p.day, period: p.period, classId: p.classId,
-        teacherId: p.teacherId, roomId: p.roomId,
+        teacherId: p.teacherId, roomId: p.roomId, studyGroupId: p.studyGroupId,
       }))
     );
   }

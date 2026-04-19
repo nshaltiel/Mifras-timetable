@@ -13,6 +13,7 @@ import { useState } from "react";
 import { useTimetableStore, type TimetableSlot } from "@/stores/timetable-store";
 import { SlotCell } from "./SlotCell";
 import { LessonCard } from "./LessonCard";
+import { StudyGroupSplitCell } from "./StudyGroupSplitCell";
 import { AddLessonDialog } from "./AddLessonDialog";
 import { DAYS_HE, PERIOD_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -116,6 +117,40 @@ export function TimetableGrid({
     if (slot.roomId) roomSlotMap[`${slot.day}-${slot.period}-${slot.roomId}`] = slot;
   }
 
+  // Build concurrent study group map: for each study-group slot, collect all sibling slots
+  // (same day, period, grade, subjectId) so the split cell can show all groups together.
+  const classGradeMap: Record<string, number> = {};
+  for (const c of classes) classGradeMap[c.id] = c.grade;
+
+  // Group study-group slots by (day, period, grade, subjectId)
+  const sgGroupings: Record<string, TimetableSlot[]> = {};
+  for (const slot of slots) {
+    if (!slot.studyGroupId) continue;
+    const grade = classGradeMap[slot.classId];
+    if (grade === undefined) continue;
+    const gKey = `${slot.day}-${slot.period}-${grade}-${slot.subjectId}`;
+    if (!sgGroupings[gKey]) sgGroupings[gKey] = [];
+    if (!sgGroupings[gKey].some((s) => s.classId === slot.classId)) {
+      sgGroupings[gKey].push(slot);
+    }
+  }
+  for (const key of Object.keys(sgGroupings)) {
+    sgGroupings[key].sort((a, b) => a.className.localeCompare(b.className));
+  }
+
+  // Map each study-group slot cell → its sorted sibling array (only when >1 sibling)
+  const concurrentSGMap: Record<string, TimetableSlot[]> = {};
+  for (const slot of slots) {
+    if (!slot.studyGroupId) continue;
+    const grade = classGradeMap[slot.classId];
+    if (grade === undefined) continue;
+    const gKey = `${slot.day}-${slot.period}-${grade}-${slot.subjectId}`;
+    const group = sgGroupings[gKey];
+    if (group && group.length > 1) {
+      concurrentSGMap[`${slot.day}-${slot.period}-${slot.classId}`] = group;
+    }
+  }
+
   // Entities present in slots (for "all" stacked views)
   const teachersWithSlots = teachers.filter((t) => slots.some((s) => s.teacherId === t.id));
   const roomsWithSlots = rooms.filter((r) => slots.some((s) => s.roomId === r.id));
@@ -211,18 +246,33 @@ export function TimetableGrid({
                   </td>
                   {days.map((day) => {
                     const key = `${day}-${period}-${filterClassId}`;
+                    const slot = slotMap[key];
+                    const sgSiblings = slot ? concurrentSGMap[key] : undefined;
                     return (
                       <td key={day} className="border-0 p-0">
-                        <SlotCell
-                          day={day}
-                          period={period}
-                          classId={filterClassId}
-                          slot={slotMap[key]}
-                          conflicts={pendingConflicts[key]}
-                          onRemove={slotMap[key] ? () => removeSlot(day, period, filterClassId) : undefined}
-                          onEdit={slotMap[key] ? () => setEditingSlot(slotMap[key]) : undefined}
-                          substitution={overlayMap[key]}
-                        />
+                        {sgSiblings ? (
+                          <StudyGroupSplitCell
+                            day={day}
+                            period={period}
+                            classId={filterClassId}
+                            ownSlot={slot!}
+                            allSlots={sgSiblings}
+                            conflicts={pendingConflicts[key]}
+                            onRemove={() => removeSlot(day, period, filterClassId)}
+                            onEdit={() => setEditingSlot(slot!)}
+                          />
+                        ) : (
+                          <SlotCell
+                            day={day}
+                            period={period}
+                            classId={filterClassId}
+                            slot={slot}
+                            conflicts={pendingConflicts[key]}
+                            onRemove={slot ? () => removeSlot(day, period, filterClassId) : undefined}
+                            onEdit={slot ? () => setEditingSlot(slot) : undefined}
+                            substitution={overlayMap[key]}
+                          />
+                        )}
                       </td>
                     );
                   })}
@@ -333,18 +383,33 @@ export function TimetableGrid({
                       )}
                       {days.map((day) => {
                         const key = `${day}-${period}-${classId}`;
+                        const slot = slotMap[key];
+                        const sgSiblings = slot ? concurrentSGMap[key] : undefined;
                         return (
                           <td key={day} className="border-0 p-0">
-                            <SlotCell
-                              day={day}
-                              period={period}
-                              classId={classId}
-                              slot={slotMap[key]}
-                              conflicts={pendingConflicts[key]}
-                              onRemove={slotMap[key] ? () => removeSlot(day, period, classId) : undefined}
-                              onEdit={slotMap[key] ? () => setEditingSlot(slotMap[key]) : undefined}
-                              substitution={overlayMap[key]}
-                            />
+                            {sgSiblings ? (
+                              <StudyGroupSplitCell
+                                day={day}
+                                period={period}
+                                classId={classId}
+                                ownSlot={slot!}
+                                allSlots={sgSiblings}
+                                conflicts={pendingConflicts[key]}
+                                onRemove={() => removeSlot(day, period, classId)}
+                                onEdit={() => setEditingSlot(slot!)}
+                              />
+                            ) : (
+                              <SlotCell
+                                day={day}
+                                period={period}
+                                classId={classId}
+                                slot={slot}
+                                conflicts={pendingConflicts[key]}
+                                onRemove={slot ? () => removeSlot(day, period, classId) : undefined}
+                                onEdit={slot ? () => setEditingSlot(slot) : undefined}
+                                substitution={overlayMap[key]}
+                              />
+                            )}
                           </td>
                         );
                       })}
