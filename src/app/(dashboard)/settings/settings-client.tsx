@@ -55,8 +55,8 @@ type Class = {
   id: string; name: string; grade: number; studentCount: number;
   homeroomTeacher: { id: string; name: string } | null;
 };
-type Layer = { id: string; name: string; order: number };
-type Room = { id: string; name: string; capacity: number; type: string; maxConcurrentClasses: number; layers: { layerId: string }[] };
+type GradeOption = { grade: number; name: string };
+type Room = { id: string; name: string; capacity: number; type: string; maxConcurrentClasses: number; layers: { layer: { order: number } }[] };
 type Subject = {
   id: string; name: string; category: string | null; color: string | null;
   _count: { teachers: number };
@@ -78,7 +78,7 @@ interface Props {
   studyGroups: StudyGroup[];
   school: School;
   users: User[];
-  layers: Layer[];
+  gradeOptions: GradeOption[];
 }
 
 // ─── Helper: Simple CRUD Dialog ───────────────────────────────────────────────
@@ -505,7 +505,7 @@ function ClassFields({ teachers, defaultValues }: { teachers: Teacher[]; default
 
 // ─── Rooms Tab ────────────────────────────────────────────────────────────────
 
-function RoomsTab({ rooms, layers }: { rooms: Room[]; layers: Layer[] }) {
+function RoomsTab({ rooms, gradeOptions }: { rooms: Room[]; gradeOptions: GradeOption[] }) {
   const router = useRouter();
 
   async function handleDelete(id: string) {
@@ -519,7 +519,7 @@ function RoomsTab({ rooms, layers }: { rooms: Room[]; layers: Layer[] }) {
         <CrudDialog title="הוספת חדר" trigger={
           <Button size="sm" className="gap-2"><Plus className="h-4 w-4" />הוספת חדר</Button>
         } onSave={createRoom}>
-          <RoomFields layers={layers} />
+          <RoomFields gradeOptions={gradeOptions} />
         </CrudDialog>
       </div>
       <div className="rounded-lg border overflow-hidden">
@@ -537,9 +537,8 @@ function RoomsTab({ rooms, layers }: { rooms: Room[]; layers: Layer[] }) {
             {rooms.length === 0 ? (
               <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">אין חדרים</TableCell></TableRow>
             ) : rooms.map((r) => {
-              const roomLayerNames = r.layers
-                .map((lr) => layers.find((l) => l.id === lr.layerId)?.name)
-                .filter(Boolean);
+              const roomGrades = r.layers.map((lr) => lr.layer.order).sort((a, b) => a - b);
+              const roomGradeNames = roomGrades.map((g) => gradeOptions.find((o) => o.grade === g)?.name ?? String(g));
               return (
                 <TableRow key={r.id}>
                   <TableCell className="font-medium">
@@ -551,7 +550,7 @@ function RoomsTab({ rooms, layers }: { rooms: Room[]; layers: Layer[] }) {
                   <TableCell><Badge variant="secondary">{ROOM_TYPE_HE[r.type] || r.type}</Badge></TableCell>
                   <TableCell className="text-sm">{r.capacity}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {roomLayerNames.length > 0 ? roomLayerNames.join(", ") : "הכל"}
+                    {roomGradeNames.length > 0 ? roomGradeNames.join(", ") : "הכל"}
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
@@ -559,13 +558,13 @@ function RoomsTab({ rooms, layers }: { rooms: Room[]; layers: Layer[] }) {
                         <Button variant="ghost" size="icon"><Pencil className="h-4 w-4" /></Button>
                       } onSave={(fd) => updateRoom(r.id, fd)}>
                         <RoomFields
-                          layers={layers}
+                          gradeOptions={gradeOptions}
                           defaultValues={{
                             name: r.name,
                             capacity: r.capacity.toString(),
                             type: r.type,
                             maxConcurrentClasses: r.maxConcurrentClasses.toString(),
-                            layerIds: r.layers.map((lr) => lr.layerId),
+                            allowedGrades: roomGrades,
                           }}
                         />
                       </CrudDialog>
@@ -583,11 +582,11 @@ function RoomsTab({ rooms, layers }: { rooms: Room[]; layers: Layer[] }) {
 }
 
 function RoomFields({
-  layers,
+  gradeOptions,
   defaultValues,
 }: {
-  layers: Layer[];
-  defaultValues?: { name: string; capacity: string; type: string; maxConcurrentClasses?: string; layerIds?: string[] };
+  gradeOptions: GradeOption[];
+  defaultValues?: { name: string; capacity: string; type: string; maxConcurrentClasses?: string; allowedGrades?: number[] };
 }) {
   return (
     <>
@@ -613,21 +612,21 @@ function RoomFields({
         />
         <p className="text-xs text-muted-foreground">לרוב הכיתות: 1. לאולם ספורט / ספרייה: 2 ומעלה.</p>
       </div>
-      {layers.length > 0 && (
+      {gradeOptions.length > 0 && (
         <div className="space-y-2">
           <Label>זמין לשכבות</Label>
           <p className="text-xs text-muted-foreground">ללא סימון — זמין לכל השכבות</p>
           <div className="flex flex-wrap gap-3">
-            {layers.map((layer) => (
-              <label key={layer.id} className="flex items-center gap-2 cursor-pointer">
+            {gradeOptions.map((opt) => (
+              <label key={opt.grade} className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
-                  name="layerIds"
-                  value={layer.id}
-                  defaultChecked={defaultValues?.layerIds?.includes(layer.id)}
+                  name="grades"
+                  value={opt.grade}
+                  defaultChecked={defaultValues?.allowedGrades?.includes(opt.grade)}
                   className="rounded"
                 />
-                <span className="text-sm">{layer.name}</span>
+                <span className="text-sm">{opt.name}</span>
               </label>
             ))}
           </div>
@@ -1181,7 +1180,7 @@ const TABS = [
 
 type TabId = typeof TABS[number]["id"];
 
-export function SettingsClient({ teachers, classes, rooms, subjects, studyGroups, school, users, layers }: Props) {
+export function SettingsClient({ teachers, classes, rooms, subjects, studyGroups, school, users, gradeOptions }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>("teachers");
   const router = useRouter();
   const [isPendingName, startNameTransition] = useTransition();
@@ -1246,7 +1245,7 @@ export function SettingsClient({ teachers, classes, rooms, subjects, studyGroups
       <div>
         {activeTab === "teachers" && <TeachersTab teachers={teachers} subjects={subjects} dayCount={school?.dayCount ?? 6} periodCount={school?.periodCount ?? 9} />}
         {activeTab === "classes" && <ClassesTab classes={classes} teachers={teachers} />}
-        {activeTab === "rooms" && <RoomsTab rooms={rooms} layers={layers} />}
+        {activeTab === "rooms" && <RoomsTab rooms={rooms} gradeOptions={gradeOptions} />}
         {activeTab === "subjects" && <SubjectsTab subjects={subjects} />}
         {activeTab === "study-groups" && <StudyGroupsTab studyGroups={studyGroups} teachers={teachers} classes={classes} subjects={subjects} />}
         {activeTab === "period-times" && <PeriodTimesTab school={school} />}

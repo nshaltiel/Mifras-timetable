@@ -1,12 +1,13 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { GRADE_HE } from "@/lib/constants";
 import { SettingsClient } from "./settings-client";
 
 export default async function SettingsPage() {
   const session = await auth();
   const schoolId = (session?.user as Record<string, unknown>)?.schoolId as string;
 
-  const [teachers, classes, rooms, subjects, studyGroups, school, users, layers] = await Promise.all([
+  const [teachers, classes, rooms, subjects, studyGroups, school, users] = await Promise.all([
     prisma.teacher.findMany({
       where: { schoolId },
       include: {
@@ -24,7 +25,7 @@ export default async function SettingsPage() {
     }),
     prisma.room.findMany({
       where: { schoolId },
-      include: { layers: { select: { layerId: true } } },
+      include: { layers: { include: { layer: { select: { order: true } } } } },
       orderBy: { name: "asc" },
     }),
     prisma.subject.findMany({
@@ -43,8 +44,11 @@ export default async function SettingsPage() {
     }),
     prisma.school.findUnique({ where: { id: schoolId } }),
     prisma.user.findMany({ where: { schoolId }, orderBy: { createdAt: "asc" } }),
-    prisma.layer.findMany({ where: { schoolId }, orderBy: { order: "asc" } }),
   ]);
+
+  const gradeOptions = [...new Set(classes.map((c) => c.grade))]
+    .sort((a, b) => a - b)
+    .map((grade) => ({ grade, name: GRADE_HE[grade] || `שכבה ${grade}` }));
 
   return (
     <SettingsClient
@@ -55,7 +59,7 @@ export default async function SettingsPage() {
       studyGroups={studyGroups}
       school={school}
       users={users}
-      layers={layers}
+      gradeOptions={gradeOptions}
     />
   );
 }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "./prisma";
 import { auth } from "./auth";
 import { teacherSchema, classSchema, roomSchema, subjectSchema } from "./validators";
+import { GRADE_HE } from "./constants";
 
 async function getSchoolId() {
   const session = await auth();
@@ -128,6 +129,15 @@ export async function deleteTeacher(id: string) {
 
 // ─── Classes ─────────────────────────────────────
 
+async function upsertGradeLayer(schoolId: string, grade: number) {
+  const name = GRADE_HE[grade] || `שכבה ${grade}`;
+  return prisma.layer.upsert({
+    where: { schoolId_name: { schoolId, name } },
+    create: { schoolId, name, order: grade },
+    update: { order: grade },
+  });
+}
+
 export async function createClass(data: FormData) {
   const schoolId = await getSchoolId();
   const parsed = classSchema.parse({
@@ -137,6 +147,8 @@ export async function createClass(data: FormData) {
     homeroomTeacherId: data.get("homeroomTeacherId"),
   });
 
+  const layer = await upsertGradeLayer(schoolId, parsed.grade);
+
   await prisma.class.create({
     data: {
       name: parsed.name,
@@ -144,6 +156,7 @@ export async function createClass(data: FormData) {
       studentCount: parsed.studentCount,
       homeroomTeacherId: parsed.homeroomTeacherId || null,
       schoolId,
+      layerId: layer.id,
     },
   });
 
@@ -159,6 +172,8 @@ export async function updateClass(id: string, data: FormData) {
     homeroomTeacherId: data.get("homeroomTeacherId"),
   });
 
+  const layer = await upsertGradeLayer(schoolId, parsed.grade);
+
   await prisma.class.update({
     where: { id, schoolId },
     data: {
@@ -166,6 +181,7 @@ export async function updateClass(id: string, data: FormData) {
       grade: parsed.grade,
       studentCount: parsed.studentCount,
       homeroomTeacherId: parsed.homeroomTeacherId || null,
+      layerId: layer.id,
     },
   });
 
@@ -189,20 +205,21 @@ export async function createRoom(data: FormData) {
     maxConcurrentClasses: data.get("maxConcurrentClasses") || 1,
   });
   const categoryId = (data.get("categoryId") as string) || null;
-  const layerIds = data.getAll("layerIds") as string[];
+  const grades = (data.getAll("grades") as string[]).map(Number).filter(Boolean);
 
   const room = await prisma.room.create({
     data: { ...parsed, schoolId, categoryId: categoryId || null },
   });
 
-  if (layerIds.length > 0) {
+  if (grades.length > 0) {
+    const layers = await Promise.all(grades.map((g) => upsertGradeLayer(schoolId, g)));
     await prisma.layerRoom.createMany({
-      data: layerIds.map((layerId) => ({ layerId, roomId: room.id })),
+      data: layers.map((l) => ({ layerId: l.id, roomId: room.id })),
     });
   }
 
   revalidatePath("/settings");
-  revalidatePath("/rooms");
+  revalidatePath("/timetable");
 }
 
 export async function updateRoom(id: string, data: FormData) {
@@ -214,21 +231,22 @@ export async function updateRoom(id: string, data: FormData) {
     maxConcurrentClasses: data.get("maxConcurrentClasses") || 1,
   });
   const categoryId = (data.get("categoryId") as string) || null;
-  const layerIds = data.getAll("layerIds") as string[];
+  const grades = (data.getAll("grades") as string[]).map(Number).filter(Boolean);
 
-  await prisma.$transaction([
-    prisma.room.update({
-      where: { id, schoolId },
-      data: { ...parsed, categoryId: categoryId || null },
-    }),
-    prisma.layerRoom.deleteMany({ where: { roomId: id } }),
-    ...(layerIds.length > 0
-      ? [prisma.layerRoom.createMany({ data: layerIds.map((layerId) => ({ layerId, roomId: id })) })]
-      : []),
-  ]);
+  await prisma.room.update({
+    where: { id, schoolId },
+    data: { ...parsed, categoryId: categoryId || null },
+  });
+  await prisma.layerRoom.deleteMany({ where: { roomId: id } });
+  if (grades.length > 0) {
+    const layers = await Promise.all(grades.map((g) => upsertGradeLayer(schoolId, g)));
+    await prisma.layerRoom.createMany({
+      data: layers.map((l) => ({ layerId: l.id, roomId: id })),
+    });
+  }
 
   revalidatePath("/settings");
-  revalidatePath("/rooms");
+  revalidatePath("/timetable");
 }
 
 export async function deleteRoom(id: string) {
