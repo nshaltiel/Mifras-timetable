@@ -9,6 +9,7 @@ export interface SlotData {
   subjectId: string;
   roomId?: string | null;
   studyGroupId?: string | null;
+  splitGroupId?: string | null;
 }
 
 /** Optional metadata for layer/exclusion checks. */
@@ -64,6 +65,10 @@ export function detectConflicts(
     const sharedStudyGroup =
       proposed.studyGroupId != null && proposed.studyGroupId === existing.studyGroupId;
 
+    // Split period: two halves of the same split share (day, period, classId) — not a conflict
+    const sharedSplit =
+      proposed.splitGroupId != null && proposed.splitGroupId === existing.splitGroupId;
+
     // Teacher double-booked
     if (existing.teacherId === proposed.teacherId && !sharedStudyGroup) {
       conflicts.push({
@@ -75,7 +80,7 @@ export function detectConflicts(
     }
 
     // Class double-booked
-    if (existing.classId === proposed.classId) {
+    if (existing.classId === proposed.classId && !sharedSplit) {
       conflicts.push({
         type: "CLASS_DOUBLE_BOOKED",
         message: `לכיתה כבר יש שיעור בשעה זו`,

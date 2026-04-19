@@ -173,9 +173,11 @@ model TimetableSlot {
   studyGroupId String?
   studyGroup   StudyGroup? @relation(fields: [studyGroupId], references: [id], onDelete: SetNull)
 
-  @@unique([day, period, classId])
+  splitGroupId String?
+
   @@unique([day, period, teacherId])
   @@index([day, period, roomId])
+  @@index([splitGroupId])
 }
 
 // ──────────────────────────────────────

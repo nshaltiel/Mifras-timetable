@@ -85,15 +85,38 @@ export function AddLessonDialog({
   const extraKeyBase = useId();
   const [extraGroups, setExtraGroups] = useState<ExtraGroup[]>([]);
 
+  // Split period state
+  const [isSplit, setIsSplit] = useState(!!editingSlot?.splitGroupId);
+  const [splitSubjectId, setSplitSubjectId] = useState("");
+  const [splitTeacherId, setSplitTeacherId] = useState("");
+  const [splitRoomId, setSplitRoomId] = useState("");
+
   const isOpen = forceOpen || open;
 
-  const { addSlot, removeSlot, slots } = useTimetableStore();
+  const { addSlot, removeSlot, removeSplitHalf, slots } = useTimetableStore();
 
-  // Slots excluding the one currently being edited (for conflict checks)
-  const otherSlots = slots.filter(
-    (s: TimetableSlot) =>
-      !(editingSlot && s.day === editingSlot.day && s.period === editingSlot.period && s.classId === editingSlot.classId)
-  );
+  // Slots excluding the one(s) currently being edited (for conflict checks)
+  // For split edits: exclude all slots with the same splitGroupId
+  const otherSlots = slots.filter((s: TimetableSlot) => {
+    if (!editingSlot) return true;
+    if (editingSlot.splitGroupId && s.splitGroupId === editingSlot.splitGroupId) return false;
+    return !(s.day === editingSlot.day && s.period === editingSlot.period && s.classId === editingSlot.classId);
+  });
+
+  // If editing a split slot, find the partner to pre-populate split B fields
+  useEffect(() => {
+    if (editingSlot?.splitGroupId) {
+      const partner = slots.find(
+        (s: TimetableSlot) => s.splitGroupId === editingSlot.splitGroupId && s.id !== editingSlot.id
+      );
+      if (partner) {
+        setIsSplit(true);
+        setSplitSubjectId(partner.subjectId);
+        setSplitTeacherId(partner.teacherId);
+        setSplitRoomId(partner.roomId ?? "");
+      }
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedClass = classes.find((c) => c.id === classId);
 
@@ -135,6 +158,19 @@ export function AddLessonDialog({
     const excluded = excludedTeacherIds.has(t.id);
     const reason = booked ? " — משובץ כבר" : blocked ? " — אילוץ" : excluded ? " — לא מורשה לכיתה" : "";
     return { t, free: free && !excluded, reason };
+  });
+
+  // Teacher options for the split-B half: same logic but filtered to splitSubjectId, excluding A teacher
+  const splitTeacherOptionsForSubject = splitSubjectId
+    ? teachers.filter((t) => t.subjects.some((ts) => ts.subject.id === splitSubjectId) && t.id !== teacherId)
+    : teachers.filter((t) => t.id !== teacherId);
+  const splitTeacherOptionsWithStatus = splitTeacherOptionsForSubject.map((t) => {
+    const booked = otherSlots.some((s: TimetableSlot) =>
+      s.teacherId === t.id && s.day === day && s.period === period
+    );
+    const blocked = hardConstraints.some((c) => c.teacherId === t.id && (c.day == null || c.day === day) && (c.period == null || c.period === period));
+    const reason = booked ? " — משובץ כבר" : blocked ? " — אילוץ" : "";
+    return { t, free: !booked && !blocked, reason };
   });
 
   const selectedSubject = subjects.find((s) => s.id === subjectId);
@@ -195,10 +231,25 @@ export function AddLessonDialog({
     const room = rooms.find((r) => r.id === roomId);
     if (!teacher || !cls || !subject) return;
 
-    // If editing, remove the old slot first
+    // If editing, remove the old slot(s) first
     if (isEditing && editingSlot) {
-      removeSlot(editingSlot.day, editingSlot.period, editingSlot.classId);
+      if (editingSlot.splitGroupId) {
+        // Remove both halves of the split being edited
+        const partner = slots.find(
+          (s: TimetableSlot) => s.splitGroupId === editingSlot.splitGroupId && s.id !== editingSlot.id
+        );
+        removeSplitHalf(editingSlot);
+        if (partner) removeSplitHalf(partner);
+      } else {
+        removeSlot(editingSlot.day, editingSlot.period, editingSlot.classId);
+      }
     }
+
+    // Generate a shared splitGroupId if this is a split period
+    const splitGroupId =
+      isSplit && splitSubjectId && splitTeacherId
+        ? crypto.randomUUID()
+        : null;
 
     const slotBase = {
       day,
@@ -207,6 +258,7 @@ export function AddLessonDialog({
       subjectId,
       roomId: roomId || null,
       studyGroupId: studyGroupId || null,
+      splitGroupId,
       subjectName: subject.name,
       subjectColor: subject.color || "#4d90fe",
       teacherName: teacher.name,
@@ -227,6 +279,33 @@ export function AddLessonDialog({
       const conflicts = addSlot({ ...slotBase, classId: target.classId, className: target.className });
       if (conflicts.length > 0) {
         allConflictMsgs.push(...conflicts.map((c) => c.message));
+      }
+    }
+
+    // Place split-B half if split mode is on
+    if (splitGroupId && splitSubjectId && splitTeacherId) {
+      const splitSubject = subjects.find((s) => s.id === splitSubjectId);
+      const splitTeacher = teachers.find((t) => t.id === splitTeacherId);
+      const splitRoom = rooms.find((r) => r.id === splitRoomId);
+      if (splitSubject && splitTeacher) {
+        const splitConflicts = addSlot({
+          day,
+          period,
+          classId,
+          className: cls.name,
+          teacherId: splitTeacherId,
+          teacherName: splitTeacher.name,
+          subjectId: splitSubjectId,
+          subjectName: splitSubject.name,
+          subjectColor: splitSubject.color || "#4d90fe",
+          roomId: splitRoomId || null,
+          roomName: splitRoom?.name,
+          studyGroupId: null,
+          splitGroupId,
+        });
+        if (splitConflicts.length > 0) {
+          allConflictMsgs.push(...splitConflicts.map((c) => c.message));
+        }
       }
     }
 
@@ -255,7 +334,7 @@ export function AddLessonDialog({
     }
 
     if (allConflictMsgs.length > 0) {
-      // If we removed old slot and got conflict, restore it
+      // If we removed old slot(s) and got conflict, restore them
       if (isEditing && editingSlot) {
         addSlot(editingSlot);
       }
@@ -272,6 +351,10 @@ export function AddLessonDialog({
 
   function handleClose() {
     setExtraGroups([]);
+    setIsSplit(false);
+    setSplitSubjectId("");
+    setSplitTeacherId("");
+    setSplitRoomId("");
     setConflictMsg("");
     if (forceOpen && onClose) {
       onClose();
@@ -455,6 +538,79 @@ export function AddLessonDialog({
             </div>
           )}
 
+          {/* Split period toggle — only for regular (non-study-group) lessons */}
+          {!studyGroupId && (
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={isSplit}
+                onChange={(e) => {
+                  setIsSplit(e.target.checked);
+                  if (!e.target.checked) {
+                    setSplitSubjectId("");
+                    setSplitTeacherId("");
+                    setSplitRoomId("");
+                  }
+                }}
+                className="h-4 w-4 rounded border-input"
+              />
+              <span>פצל שעה — שני שיעורים במקביל לאותה כיתה</span>
+            </label>
+          )}
+
+          {/* Split-B form */}
+          {isSplit && !studyGroupId && (
+            <div className="border rounded-md p-3 space-y-2 bg-muted/20">
+              <p className="text-xs font-semibold text-muted-foreground">חצי B</p>
+
+              <div className="space-y-1">
+                <Label>מקצוע B</Label>
+                <select
+                  value={splitSubjectId}
+                  onChange={(e) => { setSplitSubjectId(e.target.value); setSplitTeacherId(""); }}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                >
+                  <option value="">בחר מקצוע</option>
+                  {subjects.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <Label>מורה B</Label>
+                <select
+                  value={splitTeacherId}
+                  onChange={(e) => setSplitTeacherId(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                >
+                  <option value="">בחר מורה</option>
+                  {splitTeacherOptionsWithStatus.map(({ t, free, reason }) => (
+                    <option key={t.id} value={t.id} disabled={!free}>
+                      {t.name}{reason}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <Label>חדר B (אופציונלי)</Label>
+                <select
+                  value={splitRoomId}
+                  onChange={(e) => setSplitRoomId(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                >
+                  <option value="">ללא חדר</option>
+                  {allRoomsWithStatus.map(({ room: r, occupied }) => (
+                    <option key={r.id} value={r.id} disabled={occupied && r.id !== splitRoomId}>
+                      {r.name}{r.capacity > 0 ? ` (קיבולת ${r.capacity})` : ""}{occupied ? " — תפוס" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-1">
             <Label>מורה</Label>
             {isHomeroomSubject && homeroomTeacherId ? (
@@ -546,7 +702,7 @@ export function AddLessonDialog({
           )}
 
           <div className="flex gap-2">
-            <Button onClick={handleAdd} disabled={!classId || !teacherId || !subjectId}>
+            <Button onClick={handleAdd} disabled={!classId || !teacherId || !subjectId || (isSplit && (!splitSubjectId || !splitTeacherId))}>
               {isEditing ? "שמור" : "הוספה"}
             </Button>
             <Button variant="outline" onClick={handleClose}>ביטול</Button>

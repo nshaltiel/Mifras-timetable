@@ -73,6 +73,7 @@ export async function loadTimetableData(classId?: string) {
       subjectId: s.subjectId,
       roomId: s.roomId,
       studyGroupId: s.studyGroupId,
+      splitGroupId: s.splitGroupId,
       subjectName: s.subject.name,
       subjectColor: s.subject.color ?? "#4d90fe",
       teacherName: s.teacher.name,
@@ -108,7 +109,7 @@ export async function saveSlot(slot: Omit<TimetableSlot, "subjectName" | "subjec
   // Get all other slots for conflict check (server-side validation)
   const existingSlots = await prisma.timetableSlot.findMany({
     where: { class: { schoolId } },
-    select: { id: true, day: true, period: true, classId: true, teacherId: true, subjectId: true, roomId: true },
+    select: { id: true, day: true, period: true, classId: true, teacherId: true, subjectId: true, roomId: true, studyGroupId: true, splitGroupId: true },
   });
 
   const conflicts = detectConflicts(
@@ -132,26 +133,27 @@ export async function saveSlot(slot: Omit<TimetableSlot, "subjectName" | "subjec
         classId: slot.classId,
         teacherId: slot.teacherId,
         subjectId: slot.subjectId,
-        roomId: slot.roomId,
+        roomId: slot.roomId ?? null,
+        splitGroupId: slot.splitGroupId ?? null,
       },
     });
   } else {
-    await prisma.timetableSlot.upsert({
-      where: {
-        day_period_classId: { day: slot.day, period: slot.period, classId: slot.classId },
-      },
-      create: {
+    // For regular (non-split) slots: remove any existing non-split slot at this position first
+    if (!slot.splitGroupId) {
+      await prisma.timetableSlot.deleteMany({
+        where: { day: slot.day, period: slot.period, classId: slot.classId, splitGroupId: null },
+      });
+    }
+    await prisma.timetableSlot.create({
+      data: {
         day: slot.day,
         period: slot.period,
         classId: slot.classId,
         teacherId: slot.teacherId,
         subjectId: slot.subjectId,
         roomId: slot.roomId ?? null,
-      },
-      update: {
-        teacherId: slot.teacherId,
-        subjectId: slot.subjectId,
-        roomId: slot.roomId ?? null,
+        studyGroupId: slot.studyGroupId ?? null,
+        splitGroupId: slot.splitGroupId ?? null,
       },
     });
   }
@@ -166,6 +168,27 @@ export async function deleteSlot(day: number, period: number, classId: string) {
   await prisma.timetableSlot.deleteMany({
     where: { day, period, classId, class: { schoolId } },
   });
+
+  revalidatePath("/timetable");
+}
+
+export async function deleteSplitHalf(slotId: string) {
+  const schoolId = await getSchoolId();
+
+  const slot = await prisma.timetableSlot.findFirst({
+    where: { id: slotId, class: { schoolId } },
+  });
+  if (!slot) throw new Error("שיעור לא נמצא");
+
+  await prisma.timetableSlot.delete({ where: { id: slotId } });
+
+  // Detach partner: clear its splitGroupId so it becomes a regular slot
+  if (slot.splitGroupId) {
+    await prisma.timetableSlot.updateMany({
+      where: { splitGroupId: slot.splitGroupId, id: { not: slotId } },
+      data: { splitGroupId: null },
+    });
+  }
 
   revalidatePath("/timetable");
 }
@@ -265,6 +288,8 @@ export async function saveTimetableBulk(slots: Array<Omit<TimetableSlot, "subjec
         teacherId: s.teacherId,
         subjectId: s.subjectId,
         roomId: s.roomId ?? null,
+        studyGroupId: s.studyGroupId ?? null,
+        splitGroupId: s.splitGroupId ?? null,
       })),
     });
   }

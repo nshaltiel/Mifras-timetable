@@ -26,6 +26,7 @@ export interface TimetableState {
   addSlot: (slot: TimetableSlot) => Conflict[];
   updateSlot: (id: string, updates: Partial<TimetableSlot>) => Conflict[];
   removeSlot: (day: number, period: number, classId: string) => void;
+  removeSplitHalf: (slot: TimetableSlot) => void;
   moveSlot: (
     fromDay: number,
     fromPeriod: number,
@@ -86,9 +87,12 @@ export const useTimetableStore = create<TimetableState>()(
       const conflicts = detectConflicts(slot, get().slots, get().teacherConstraints);
 
       set((state) => {
-        // Remove any existing slot in the same position
+        // Remove any existing slot in the same position, but don't evict a split partner
         state.slots = state.slots.filter(
-          (s) => !(s.day === slot.day && s.period === slot.period && s.classId === slot.classId)
+          (s) => !(
+            s.day === slot.day && s.period === slot.period && s.classId === slot.classId &&
+            !(slot.splitGroupId && s.splitGroupId === slot.splitGroupId)
+          )
         );
         state.slots.push(slot);
 
@@ -136,6 +140,39 @@ export const useTimetableStore = create<TimetableState>()(
           (s) => !(s.day === day && s.period === period && s.classId === classId)
         );
         const key = `${day}-${period}-${classId}`;
+        delete state.pendingConflicts[key];
+
+        const newHistory = state.history.slice(0, state.historyIndex + 1);
+        newHistory.push([...state.slots]);
+        if (newHistory.length > MAX_HISTORY) newHistory.shift();
+        state.history = newHistory;
+        state.historyIndex = newHistory.length - 1;
+        state.isDirty = true;
+      });
+    },
+
+    removeSplitHalf: (slot) => {
+      set((state) => {
+        // Find target by id if available, otherwise by splitGroupId + teacherId
+        const target = slot.id
+          ? state.slots.find((s) => s.id === slot.id)
+          : state.slots.find(
+              (s) => s.splitGroupId === slot.splitGroupId && s.teacherId === slot.teacherId &&
+                     s.day === slot.day && s.period === slot.period && s.classId === slot.classId
+            );
+        if (!target) return;
+        const partnerId = target.splitGroupId;
+        state.slots = slot.id
+          ? state.slots.filter((s) => s.id !== slot.id)
+          : state.slots.filter((s) => !(s.teacherId === slot.teacherId && s.splitGroupId === slot.splitGroupId));
+        // Detach partner: clear its splitGroupId so it becomes a regular slot
+        if (partnerId) {
+          const partnerIdx = state.slots.findIndex(
+            (s) => s.splitGroupId === partnerId && s.teacherId !== slot.teacherId
+          );
+          if (partnerIdx >= 0) state.slots[partnerIdx].splitGroupId = null;
+        }
+        const key = `${target.day}-${target.period}-${target.classId}`;
         delete state.pendingConflicts[key];
 
         const newHistory = state.history.slice(0, state.historyIndex + 1);

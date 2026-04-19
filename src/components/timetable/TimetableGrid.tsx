@@ -14,6 +14,7 @@ import { useTimetableStore, type TimetableSlot } from "@/stores/timetable-store"
 import { SlotCell } from "./SlotCell";
 import { LessonCard } from "./LessonCard";
 import { StudyGroupSplitCell } from "./StudyGroupSplitCell";
+import { SplitPeriodCell } from "./SplitPeriodCell";
 import { AddLessonDialog } from "./AddLessonDialog";
 import { DAYS_HE, PERIOD_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -79,7 +80,7 @@ export function TimetableGrid({
   studyGroups = [],
   teacherConstraints = [],
 }: TimetableGridProps) {
-  const { slots, pendingConflicts, moveSlot, removeSlot } = useTimetableStore();
+  const { slots, pendingConflicts, moveSlot, removeSlot, removeSplitHalf } = useTimetableStore();
   const [activeSlot, setActiveSlot] = useState<TimetableSlot | null>(null);
   const [editingSlot, setEditingSlot] = useState<TimetableSlot | null>(null);
 
@@ -108,11 +109,12 @@ export function TimetableGrid({
   }
 
   // Build lookup maps
-  const slotMap: Record<string, TimetableSlot> = {};
+  const slotMap: Record<string, TimetableSlot[]> = {};
   const teacherSlotMap: Record<string, TimetableSlot> = {};
   const roomSlotMap: Record<string, TimetableSlot> = {};
   for (const slot of slots) {
-    slotMap[`${slot.day}-${slot.period}-${slot.classId}`] = slot;
+    const key = `${slot.day}-${slot.period}-${slot.classId}`;
+    (slotMap[key] ??= []).push(slot);
     teacherSlotMap[`${slot.day}-${slot.period}-${slot.teacherId}`] = slot;
     if (slot.roomId) roomSlotMap[`${slot.day}-${slot.period}-${slot.roomId}`] = slot;
   }
@@ -246,11 +248,23 @@ export function TimetableGrid({
                   </td>
                   {days.map((day) => {
                     const key = `${day}-${period}-${filterClassId}`;
-                    const slot = slotMap[key];
-                    const sgSiblings = slot ? concurrentSGMap[key] : undefined;
+                    const cellSlots = slotMap[key] ?? [];
+                    const slot = cellSlots[0];
+                    const isSplitCell = cellSlots.length === 2 && cellSlots[0]?.splitGroupId != null;
+                    const sgSiblings = !isSplitCell && slot ? concurrentSGMap[key] : undefined;
                     return (
                       <td key={day} className="border-0 p-0">
-                        {sgSiblings ? (
+                        {isSplitCell ? (
+                          <SplitPeriodCell
+                            day={day}
+                            period={period}
+                            classId={filterClassId}
+                            slots={cellSlots as [TimetableSlot, TimetableSlot]}
+                            conflicts={pendingConflicts[key]}
+                            onRemoveHalf={(s) => removeSplitHalf(s)}
+                            onEdit={(s) => setEditingSlot(s)}
+                          />
+                        ) : sgSiblings ? (
                           <StudyGroupSplitCell
                             day={day}
                             period={period}
@@ -383,11 +397,23 @@ export function TimetableGrid({
                       )}
                       {days.map((day) => {
                         const key = `${day}-${period}-${classId}`;
-                        const slot = slotMap[key];
-                        const sgSiblings = slot ? concurrentSGMap[key] : undefined;
+                        const cellSlots = slotMap[key] ?? [];
+                        const slot = cellSlots[0];
+                        const isSplitCell = cellSlots.length === 2 && cellSlots[0]?.splitGroupId != null;
+                        const sgSiblings = !isSplitCell && slot ? concurrentSGMap[key] : undefined;
                         return (
                           <td key={day} className="border-0 p-0">
-                            {sgSiblings ? (
+                            {isSplitCell ? (
+                              <SplitPeriodCell
+                                day={day}
+                                period={period}
+                                classId={classId}
+                                slots={cellSlots as [TimetableSlot, TimetableSlot]}
+                                conflicts={pendingConflicts[key]}
+                                onRemoveHalf={(s) => removeSplitHalf(s)}
+                                onEdit={(s) => setEditingSlot(s)}
+                              />
+                            ) : sgSiblings ? (
                               <StudyGroupSplitCell
                                 day={day}
                                 period={period}
