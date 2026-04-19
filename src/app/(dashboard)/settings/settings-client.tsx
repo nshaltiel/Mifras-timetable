@@ -394,7 +394,7 @@ function TeacherFields({ defaultValues, subjects, dayCount, periodCount }: {
 
 // ─── Classes Tab ──────────────────────────────────────────────────────────────
 
-function ClassesTab({ classes, teachers }: { classes: Class[]; teachers: Teacher[] }) {
+function ClassesTab({ classes, teachers, layers }: { classes: Class[]; teachers: Teacher[]; layers: Layer[] }) {
   const router = useRouter();
 
   async function handleDelete(id: string) {
@@ -445,6 +445,36 @@ function ClassesTab({ classes, teachers }: { classes: Class[]; teachers: Teacher
             ))}
           </TableBody>
         </Table>
+      </div>
+
+      {/* Layers management */}
+      <div className="space-y-3 pt-4 border-t border-border">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold">שכבות</h3>
+            <p className="text-xs text-muted-foreground">שכבות משמשות לקיבוץ כיתות ולהגדרת זמינות חדרים</p>
+          </div>
+          <CrudDialog title="הוספת שכבה" trigger={
+            <Button size="sm" variant="outline" className="gap-2"><Plus className="h-4 w-4" />הוספת שכבה</Button>
+          } onSave={createLayerFromForm}>
+            <div className="space-y-1">
+              <Label>שם שכבה</Label>
+              <Input name="name" placeholder='לדוגמה: שכבה י׳' required />
+            </div>
+          </CrudDialog>
+        </div>
+        {layers.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-2">אין שכבות מוגדרות</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {layers.map((layer) => (
+              <div key={layer.id} className="flex items-center gap-1.5 bg-muted rounded-md px-3 py-1.5 text-sm">
+                <span className="font-medium">{layer.name}</span>
+                <DeleteButton action={async () => { await deleteLayer(layer.id); router.refresh(); }} entityName={layer.name} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1228,7 +1258,6 @@ const TABS = [
   { id: "teachers", label: "מורים" },
   { id: "classes", label: "כיתות" },
   { id: "rooms", label: "חדרים" },
-  { id: "layers", label: "שכבות" },
   { id: "subjects", label: "מקצועות" },
   { id: "study-groups", label: "קבוצות לימוד" },
   { id: "period-times", label: "שעות שיעורים" },
@@ -1301,9 +1330,8 @@ export function SettingsClient({ teachers, classes, rooms, subjects, studyGroups
       {/* Tab content */}
       <div>
         {activeTab === "teachers" && <TeachersTab teachers={teachers} subjects={subjects} dayCount={school?.dayCount ?? 6} periodCount={school?.periodCount ?? 9} />}
-        {activeTab === "classes" && <ClassesTab classes={classes} teachers={teachers} />}
+        {activeTab === "classes" && <ClassesTab classes={classes} teachers={teachers} layers={layers} />}
         {activeTab === "rooms" && <RoomsTab rooms={rooms} layers={layers} />}
-        {activeTab === "layers" && <LayersTab layers={layers} />}
         {activeTab === "subjects" && <SubjectsTab subjects={subjects} />}
         {activeTab === "study-groups" && <StudyGroupsTab studyGroups={studyGroups} teachers={teachers} classes={classes} subjects={subjects} />}
         {activeTab === "period-times" && <PeriodTimesTab school={school} />}
