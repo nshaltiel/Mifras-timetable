@@ -345,6 +345,13 @@ export async function importTeachersFromExcel(rows: {
 
 // ─── Layers ──────────────────────────────────────────────────────────────────
 
+export async function createLayerFromForm(fd: FormData) {
+  const name = (fd.get("name") as string)?.trim();
+  if (!name) return;
+  await createLayer({ name });
+  revalidatePath("/settings");
+}
+
 export async function createLayer(data: { name: string; roomIds?: string[] }) {
   const schoolId = await getSchoolId();
   const layer = await prisma.layer.create({

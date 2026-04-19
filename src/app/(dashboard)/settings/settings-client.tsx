@@ -30,6 +30,7 @@ import {
   createRoom, updateRoom, deleteRoom,
   createSubject, updateSubject, deleteSubject,
   updateSchoolPeriodTimes, importTeachersFromExcel,
+  createLayerFromForm, deleteLayer,
 } from "@/lib/actions";
 import { createStudyGroup, deleteStudyGroup } from "@/lib/study-group-actions";
 import { updateStudyGroup } from "@/lib/scheduling-actions";
@@ -636,6 +637,61 @@ function RoomFields({
   );
 }
 
+// ─── Layers Tab ───────────────────────────────────────────────────────────────
+
+function LayersTab({ layers }: { layers: Layer[] }) {
+  const router = useRouter();
+
+  async function handleDelete(id: string) {
+    await deleteLayer(id);
+    router.refresh();
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        שכבות משמשות לקיבוץ כיתות לצורך תזמון (לדוגמה: שכבה י׳, שכבה יא׳). לאחר יצירת שכבה ניתן לשייך לה חדרים דרך לשונית החדרים.
+      </p>
+      <div className="flex justify-end">
+        <CrudDialog title="הוספת שכבה" trigger={
+          <Button size="sm" className="gap-2"><Plus className="h-4 w-4" />הוספת שכבה</Button>
+        } onSave={createLayerFromForm}>
+          <div className="space-y-1">
+            <Label>שם שכבה</Label>
+            <Input name="name" placeholder='לדוגמה: שכבה י׳' required />
+          </div>
+        </CrudDialog>
+      </div>
+      <div className="rounded-lg border overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>שם שכבה</TableHead>
+              <TableHead className="w-20">פעולות</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {layers.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={2} className="text-center py-8 text-muted-foreground">
+                  אין שכבות מוגדרות
+                </TableCell>
+              </TableRow>
+            ) : layers.map((layer) => (
+              <TableRow key={layer.id}>
+                <TableCell className="font-medium">{layer.name}</TableCell>
+                <TableCell>
+                  <DeleteButton action={() => handleDelete(layer.id)} entityName={layer.name} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Subjects Tab ─────────────────────────────────────────────────────────────
 
 function SubjectsTab({ subjects }: { subjects: Subject[] }) {
@@ -1172,6 +1228,7 @@ const TABS = [
   { id: "teachers", label: "מורים" },
   { id: "classes", label: "כיתות" },
   { id: "rooms", label: "חדרים" },
+  { id: "layers", label: "שכבות" },
   { id: "subjects", label: "מקצועות" },
   { id: "study-groups", label: "קבוצות לימוד" },
   { id: "period-times", label: "שעות שיעורים" },
@@ -1246,6 +1303,7 @@ export function SettingsClient({ teachers, classes, rooms, subjects, studyGroups
         {activeTab === "teachers" && <TeachersTab teachers={teachers} subjects={subjects} dayCount={school?.dayCount ?? 6} periodCount={school?.periodCount ?? 9} />}
         {activeTab === "classes" && <ClassesTab classes={classes} teachers={teachers} />}
         {activeTab === "rooms" && <RoomsTab rooms={rooms} layers={layers} />}
+        {activeTab === "layers" && <LayersTab layers={layers} />}
         {activeTab === "subjects" && <SubjectsTab subjects={subjects} />}
         {activeTab === "study-groups" && <StudyGroupsTab studyGroups={studyGroups} teachers={teachers} classes={classes} subjects={subjects} />}
         {activeTab === "period-times" && <PeriodTimesTab school={school} />}
