@@ -6,8 +6,9 @@ import { Panel, PanelHead, PanelBody } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { Chip } from "@/components/ui/mifras-chip";
 import { Button } from "@/components/ui/button";
-import { ArrowLeftRight, ChevronLeft, Printer } from "lucide-react";
+import { ArrowLeftRight, ChevronLeft } from "lucide-react";
 import { PERIOD_LABELS } from "@/lib/constants";
+import { PrintButton } from "./print-button";
 
 const SOLUTION_LABELS: Record<string, string> = {
   SUBSTITUTE_TEACHER: "מורה מחליף",
@@ -77,9 +78,13 @@ export default async function SubstitutionsPage() {
       const periods: number[] = JSON.parse(absence.periods);
       const slots = await prisma.timetableSlot.findMany({
         where: { teacherId: absence.teacherId, day: todayDayOfWeek, period: { in: periods } },
-        select: { period: true },
+        select: { period: true, class: { select: { name: true } }, room: { select: { name: true } } },
       });
-      return { ...absence, teachablePeriods: slots.map((s) => s.period) };
+      return {
+        ...absence,
+        teachablePeriods: slots.map((s) => s.period),
+        slotDetails: slots.map((s) => ({ period: s.period, className: s.class.name, roomName: s.room?.name ?? null })),
+      };
     })
   );
 
@@ -115,10 +120,7 @@ export default async function SubstitutionsPage() {
         title="לוח שינויים"
         subtitle={`מילוי מקום · ${todayLabel}`}
         actions={
-          <Button variant="outline" className="gap-1.5" onClick={undefined}>
-            <Printer className="size-3.5" />
-            הדפסה
-          </Button>
+          <PrintButton />
         }
       />
 
@@ -139,7 +141,7 @@ export default async function SubstitutionsPage() {
             <table className="w-full text-[13.5px]">
               <thead>
                 <tr className="bg-mifras-paper border-b border-mifras-ink-100">
-                  {["שעה", "מורה נעדר", "כיתה", "פתרון", "מחליף", ""].map((h) => (
+                  {["שעה", "מורה נעדר", "כיתה", "חדר", "פתרון", "מחליף", ""].map((h) => (
                     <th key={h} className="text-start px-4 py-3 font-semibold text-mifras-navy-700 text-[12px]">
                       {h}
                     </th>
@@ -150,13 +152,15 @@ export default async function SubstitutionsPage() {
                 {todayAbsences.map((absence) =>
                   absence.teachablePeriods.map((p) => {
                     const sub = absence.substitutions.find((s) => s.period === p);
+                    const slot = absence.slotDetails.find((s) => s.period === p);
                     return (
                       <tr key={`${absence.id}-${p}`} className="hover:bg-mifras-ink-50 transition-colors">
                         <td className="px-4 py-3 font-semibold text-mifras-navy-700">
                           {PERIOD_LABELS[p] || `ש' ${p + 1}`}
                         </td>
                         <td className="px-4 py-3">{absence.teacher.name}</td>
-                        <td className="px-4 py-3 text-mifras-ink-500">—</td>
+                        <td className="px-4 py-3 font-medium">{slot?.className ?? "—"}</td>
+                        <td className="px-4 py-3 text-mifras-ink-500">{slot?.roomName ?? "—"}</td>
                         <td className="px-4 py-3">
                           {sub ? (
                             <Chip tone={SOLUTION_TONE[sub.solutionType] ?? "ghost"}>

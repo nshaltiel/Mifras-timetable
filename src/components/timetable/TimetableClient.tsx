@@ -37,15 +37,11 @@ function EntityCombobox({
   return (
     <div className="flex items-center gap-2 pb-2 border-b border-border">
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <button
-            className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border text-xs font-medium bg-background hover:bg-muted transition-colors min-w-[140px]"
-          >
-            <span className="flex-1 text-start truncate">
-              {selected ? selected.label : <span className="text-muted-foreground">{placeholder}</span>}
-            </span>
-            <ChevronsUpDown className="h-3 w-3 text-muted-foreground shrink-0" />
-          </button>
+        <PopoverTrigger className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border text-xs font-medium bg-background hover:bg-muted transition-colors min-w-[140px]">
+          <span className="flex-1 text-start truncate">
+            {selected ? selected.label : <span className="text-muted-foreground">{placeholder}</span>}
+          </span>
+          <ChevronsUpDown className="h-3 w-3 text-muted-foreground shrink-0" />
         </PopoverTrigger>
         <PopoverContent className="w-52 p-0" align="start">
           <Command>
