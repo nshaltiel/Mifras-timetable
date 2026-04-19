@@ -6,7 +6,7 @@ export default async function SettingsPage() {
   const session = await auth();
   const schoolId = (session?.user as Record<string, unknown>)?.schoolId as string;
 
-  const [teachers, classes, rooms, subjects, studyGroups, school, users] = await Promise.all([
+  const [teachers, classes, rooms, subjects, studyGroups, school, users, layers] = await Promise.all([
     prisma.teacher.findMany({
       where: { schoolId },
       include: {
@@ -24,6 +24,7 @@ export default async function SettingsPage() {
     }),
     prisma.room.findMany({
       where: { schoolId },
+      include: { layers: { select: { layerId: true } } },
       orderBy: { name: "asc" },
     }),
     prisma.subject.findMany({
@@ -42,6 +43,7 @@ export default async function SettingsPage() {
     }),
     prisma.school.findUnique({ where: { id: schoolId } }),
     prisma.user.findMany({ where: { schoolId }, orderBy: { createdAt: "asc" } }),
+    prisma.layer.findMany({ where: { schoolId }, orderBy: { order: "asc" } }),
   ]);
 
   return (
@@ -53,6 +55,7 @@ export default async function SettingsPage() {
       studyGroups={studyGroups}
       school={school}
       users={users}
+      layers={layers}
     />
   );
 }

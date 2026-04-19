@@ -189,10 +189,17 @@ export async function createRoom(data: FormData) {
     maxConcurrentClasses: data.get("maxConcurrentClasses") || 1,
   });
   const categoryId = (data.get("categoryId") as string) || null;
+  const layerIds = data.getAll("layerIds") as string[];
 
-  await prisma.room.create({
+  const room = await prisma.room.create({
     data: { ...parsed, schoolId, categoryId: categoryId || null },
   });
+
+  if (layerIds.length > 0) {
+    await prisma.layerRoom.createMany({
+      data: layerIds.map((layerId) => ({ layerId, roomId: room.id })),
+    });
+  }
 
   revalidatePath("/settings");
   revalidatePath("/rooms");
@@ -207,11 +214,18 @@ export async function updateRoom(id: string, data: FormData) {
     maxConcurrentClasses: data.get("maxConcurrentClasses") || 1,
   });
   const categoryId = (data.get("categoryId") as string) || null;
+  const layerIds = data.getAll("layerIds") as string[];
 
-  await prisma.room.update({
-    where: { id, schoolId },
-    data: { ...parsed, categoryId: categoryId || null },
-  });
+  await prisma.$transaction([
+    prisma.room.update({
+      where: { id, schoolId },
+      data: { ...parsed, categoryId: categoryId || null },
+    }),
+    prisma.layerRoom.deleteMany({ where: { roomId: id } }),
+    ...(layerIds.length > 0
+      ? [prisma.layerRoom.createMany({ data: layerIds.map((layerId) => ({ layerId, roomId: id })) })]
+      : []),
+  ]);
 
   revalidatePath("/settings");
   revalidatePath("/rooms");

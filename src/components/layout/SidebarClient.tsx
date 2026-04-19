@@ -89,9 +89,9 @@ export function SidebarClient({ mifrasPages }: SidebarClientProps) {
         <Image
           src="/brand/logo.png"
           alt="מפרש"
-          width={96}
-          height={40}
-          className="h-10 w-auto object-contain"
+          width={192}
+          height={80}
+          className="h-20 w-auto object-contain"
         />
       </div>
 
@@ -105,7 +105,7 @@ export function SidebarClient({ mifrasPages }: SidebarClientProps) {
         </div>
 
         {/* הקמה */}
-        <div className="space-y-0.5 mt-4">
+        <div className="space-y-0.5 mt-0.5">
           {setupNav.map((item) => (
             <NavItem key={item.href} {...item} />
           ))}
