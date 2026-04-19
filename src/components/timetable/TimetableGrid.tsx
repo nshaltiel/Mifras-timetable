@@ -45,9 +45,10 @@ interface TimetableGridProps {
   classNames: Record<string, string>; // id -> name
   periodCount: number;
   dayCount?: number;
-  viewMode?: "by-class" | "by-teacher";
+  viewMode?: "by-class" | "by-teacher" | "by-room";
   filterClassId?: string;
   filterTeacherId?: string;
+  filterRoomId?: string;
   substitutionOverlays?: SubstitutionOverlay[];
   periodTimes?: { start: string; end: string }[];
   // For edit dialog
@@ -66,6 +67,8 @@ export function TimetableGrid({
   dayCount = 6,
   viewMode = "by-class",
   filterClassId,
+  filterTeacherId,
+  filterRoomId,
   substitutionOverlays = [],
   periodTimes = [],
   teachers = [],
@@ -103,12 +106,19 @@ export function TimetableGrid({
     moveSlot(from.day, from.period, from.classId, dst.day, dst.period, dst.classId);
   }
 
-  // Build a lookup map: "day-period-classId" -> slot
+  // Build lookup maps
   const slotMap: Record<string, TimetableSlot> = {};
+  const teacherSlotMap: Record<string, TimetableSlot> = {};
+  const roomSlotMap: Record<string, TimetableSlot> = {};
   for (const slot of slots) {
-    const key = `${slot.day}-${slot.period}-${slot.classId}`;
-    slotMap[key] = slot;
+    slotMap[`${slot.day}-${slot.period}-${slot.classId}`] = slot;
+    teacherSlotMap[`${slot.day}-${slot.period}-${slot.teacherId}`] = slot;
+    if (slot.roomId) roomSlotMap[`${slot.day}-${slot.period}-${slot.roomId}`] = slot;
   }
+
+  // Entities present in slots (for "all" stacked views)
+  const teachersWithSlots = teachers.filter((t) => slots.some((s) => s.teacherId === t.id));
+  const roomsWithSlots = rooms.filter((r) => slots.some((s) => s.roomId === r.id));
 
   // Build overlay map
   const overlayMap: Record<string, SubstitutionOverlay> = {};
@@ -125,6 +135,29 @@ export function TimetableGrid({
     if (t?.start && t?.end) return `${t.start}–${t.end}`;
     if (t?.start) return t.start;
     return PERIOD_LABELS[i];
+  }
+
+  function ReadonlyCell({
+    slot,
+    viewContext,
+  }: {
+    slot?: TimetableSlot;
+    viewContext: "teacher" | "room";
+  }) {
+    return (
+      <div className="min-h-[60px] p-1 border-b border-s border-border relative">
+        {slot ? (
+          <LessonCard
+            slot={slot}
+            viewContext={viewContext}
+            onEdit={() => setEditingSlot(slot)}
+            onRemove={() => removeSlot(slot.day, slot.period, slot.classId)}
+          />
+        ) : (
+          <div className="min-h-[52px]" />
+        )}
+      </div>
+    );
   }
 
   return (
@@ -195,6 +228,94 @@ export function TimetableGrid({
                   })}
                 </tr>
               ))
+            ) : viewMode === "by-teacher" && filterTeacherId ? (
+              /* Single-teacher view: one row per period */
+              periods.map((period) => (
+                <tr key={period}>
+                  <td className="border border-border bg-muted/30 p-1 text-center text-xs text-muted-foreground font-medium sticky end-0 z-10">
+                    {getPeriodLabel(period)}
+                  </td>
+                  {days.map((day) => (
+                    <td key={day} className="border-0 p-0">
+                      <ReadonlyCell
+                        slot={teacherSlotMap[`${day}-${period}-${filterTeacherId}`]}
+                        viewContext="teacher"
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : viewMode === "by-teacher" ? (
+              /* All teachers stacked */
+              teachersWithSlots.flatMap((teacher) =>
+                periods.map((period) => {
+                  const isFirstPeriod = period === 0;
+                  return (
+                    <tr key={`${teacher.id}-${period}`} className={cn(isFirstPeriod && "border-t-2 border-border")}>
+                      {isFirstPeriod && (
+                        <td
+                          rowSpan={periodCount}
+                          className="border border-border bg-primary/5 p-2 text-center text-xs font-bold w-20 sticky end-0 z-10 whitespace-nowrap"
+                        >
+                          {teacher.name}
+                        </td>
+                      )}
+                      {days.map((day) => (
+                        <td key={day} className="border-0 p-0">
+                          <ReadonlyCell
+                            slot={teacherSlotMap[`${day}-${period}-${teacher.id}`]}
+                            viewContext="teacher"
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })
+              )
+            ) : viewMode === "by-room" && filterRoomId ? (
+              /* Single-room view: one row per period */
+              periods.map((period) => (
+                <tr key={period}>
+                  <td className="border border-border bg-muted/30 p-1 text-center text-xs text-muted-foreground font-medium sticky end-0 z-10">
+                    {getPeriodLabel(period)}
+                  </td>
+                  {days.map((day) => (
+                    <td key={day} className="border-0 p-0">
+                      <ReadonlyCell
+                        slot={roomSlotMap[`${day}-${period}-${filterRoomId}`]}
+                        viewContext="room"
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : viewMode === "by-room" ? (
+              /* All rooms stacked */
+              roomsWithSlots.flatMap((room) =>
+                periods.map((period) => {
+                  const isFirstPeriod = period === 0;
+                  return (
+                    <tr key={`${room.id}-${period}`} className={cn(isFirstPeriod && "border-t-2 border-border")}>
+                      {isFirstPeriod && (
+                        <td
+                          rowSpan={periodCount}
+                          className="border border-border bg-primary/5 p-2 text-center text-xs font-bold w-20 sticky end-0 z-10 whitespace-nowrap"
+                        >
+                          {room.name}
+                        </td>
+                      )}
+                      {days.map((day) => (
+                        <td key={day} className="border-0 p-0">
+                          <ReadonlyCell
+                            slot={roomSlotMap[`${day}-${period}-${room.id}`]}
+                            viewContext="room"
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })
+              )
             ) : (
               /* Multi-class view: one section per class, grouped */
               displayClassIds.flatMap((classId) =>

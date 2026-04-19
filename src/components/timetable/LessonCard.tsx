@@ -12,9 +12,10 @@ interface LessonCardProps {
   hasConflict?: boolean;
   onRemove?: () => void;
   onEdit?: () => void;
+  viewContext?: "class" | "teacher" | "room";
 }
 
-export function LessonCard({ slot, compact, hasConflict, onRemove, onEdit }: LessonCardProps) {
+export function LessonCard({ slot, compact, hasConflict, onRemove, onEdit, viewContext = "class" }: LessonCardProps) {
   const dragId = `${slot.day}-${slot.period}-${slot.classId}`;
 
   const { attributes, listeners, setNodeRef, transform, isDragging } =
@@ -48,9 +49,27 @@ export function LessonCard({ slot, compact, hasConflict, onRemove, onEdit }: Les
       </div>
       {!compact && (
         <>
-          <div className="text-muted-foreground truncate">{slot.teacherName}</div>
-          {slot.roomName && (
-            <div className="text-muted-foreground/70 truncate">{slot.roomName}</div>
+          {viewContext === "class" && (
+            <>
+              <div className="text-muted-foreground truncate">{slot.teacherName}</div>
+              {slot.roomName && (
+                <div className="text-muted-foreground/70 truncate">{slot.roomName}</div>
+              )}
+            </>
+          )}
+          {viewContext === "teacher" && (
+            <>
+              <div className="text-muted-foreground truncate">{slot.className}</div>
+              {slot.roomName && (
+                <div className="text-muted-foreground/70 truncate">{slot.roomName}</div>
+              )}
+            </>
+          )}
+          {viewContext === "room" && (
+            <>
+              <div className="text-muted-foreground truncate">{slot.className}</div>
+              <div className="text-muted-foreground/70 truncate">{slot.teacherName}</div>
+            </>
           )}
         </>
       )}

@@ -5,14 +5,88 @@ import { useTimetableStore } from "@/stores/timetable-store";
 import { TimetableGrid } from "./TimetableGrid";
 import { AddLessonDialog } from "./AddLessonDialog";
 import { Button } from "@/components/ui/button";
-import { Undo2, Redo2, Save, AlertTriangle } from "lucide-react";
+import { Undo2, Redo2, Save, AlertTriangle, ChevronsUpDown, X } from "lucide-react";
 import { saveTimetableBulk, loadSubstitutionsForDate } from "@/lib/timetable-actions";
 import { AutoScheduleDialog } from "./AutoScheduleDialog";
 import { toast } from "sonner";
 import type { TimetableSlot } from "@/stores/timetable-store";
 import { GRADE_HE } from "@/lib/constants";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 type SubstitutionOverlay = Awaited<ReturnType<typeof loadSubstitutionsForDate>>[number];
+
+function EntityCombobox({
+  placeholder,
+  searchPlaceholder,
+  emptyText,
+  selectedId,
+  onSelect,
+  items,
+}: {
+  placeholder: string;
+  searchPlaceholder: string;
+  emptyText: string;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  items: { id: string; label: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = items.find((i) => i.id === selectedId);
+
+  return (
+    <div className="flex items-center gap-2 pb-2 border-b border-border">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border text-xs font-medium bg-background hover:bg-muted transition-colors min-w-[140px]"
+          >
+            <span className="flex-1 text-start truncate">
+              {selected ? selected.label : <span className="text-muted-foreground">{placeholder}</span>}
+            </span>
+            <ChevronsUpDown className="h-3 w-3 text-muted-foreground shrink-0" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-52 p-0" align="start">
+          <Command>
+            <CommandInput placeholder={searchPlaceholder} />
+            <CommandList>
+              <CommandEmpty>{emptyText}</CommandEmpty>
+              <CommandGroup>
+                <CommandItem
+                  value="__all__"
+                  onSelect={() => { onSelect(null); setOpen(false); }}
+                  data-checked={!selectedId}
+                >
+                  {placeholder}
+                </CommandItem>
+                {items.map((item) => (
+                  <CommandItem
+                    key={item.id}
+                    value={item.label}
+                    onSelect={() => { onSelect(item.id); setOpen(false); }}
+                    data-checked={selectedId === item.id}
+                  >
+                    {item.label}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      {selectedId && (
+        <button
+          onClick={() => onSelect(null)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <X className="h-3 w-3" />
+          נקה
+        </button>
+      )}
+    </div>
+  );
+}
 
 // Compact class selector: grade tabs + class buttons for selected grade
 function ClassSelector({
@@ -144,6 +218,9 @@ export function TimetableClient({
   const [actualView, setActualView] = useState(false);
   const [viewDate, setViewDate] = useState(todayStr);
   const [overlays, setOverlays] = useState<SubstitutionOverlay[]>([]);
+  const [viewDimension, setViewDimension] = useState<"by-class" | "by-teacher" | "by-room">("by-class");
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string | null>(null);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
 
   useEffect(() => {
     setSlots(initialSlots);
@@ -238,6 +315,25 @@ export function TimetableClient({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Dimension toggle */}
+          <div className="flex items-center gap-1 border rounded-lg p-0.5">
+            {(["by-class", "by-teacher", "by-room"] as const).map((dim) => {
+              const label = dim === "by-class" ? "כיתה" : dim === "by-teacher" ? "מורה" : "חדר";
+              return (
+                <button
+                  key={dim}
+                  onClick={() => {
+                    setViewDimension(dim);
+                    setSelectedTeacherId(null);
+                    setSelectedRoomId(null);
+                  }}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${viewDimension === dim ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
           {/* Actual view toggle */}
           <div className="flex items-center gap-1 border rounded-lg p-0.5">
             <button
@@ -296,13 +392,35 @@ export function TimetableClient({
         </div>
       </div>
 
-      {/* Class selector */}
-      <ClassSelector
-        classes={classes}
-        classesByGrade={classesByGrade}
-        selectedClassId={selectedClassId}
-        onClassChange={onClassChange}
-      />
+      {/* Entity selector */}
+      {viewDimension === "by-class" && (
+        <ClassSelector
+          classes={classes}
+          classesByGrade={classesByGrade}
+          selectedClassId={selectedClassId}
+          onClassChange={onClassChange}
+        />
+      )}
+      {viewDimension === "by-teacher" && (
+        <EntityCombobox
+          placeholder="כל המורים"
+          searchPlaceholder="חפש מורה..."
+          emptyText="לא נמצא מורה"
+          selectedId={selectedTeacherId}
+          onSelect={setSelectedTeacherId}
+          items={[...teachers].sort((a, b) => a.name.localeCompare(b.name, "he")).map((t) => ({ id: t.id, label: t.name }))}
+        />
+      )}
+      {viewDimension === "by-room" && (
+        <EntityCombobox
+          placeholder="כל החדרים"
+          searchPlaceholder="חפש חדר..."
+          emptyText="לא נמצא חדר"
+          selectedId={selectedRoomId}
+          onSelect={setSelectedRoomId}
+          items={[...rooms].sort((a, b) => a.name.localeCompare(b.name, "he")).map((r) => ({ id: r.id, label: r.name }))}
+        />
+      )}
 
       {/* Grid */}
       <div className="flex-1 overflow-auto border rounded-lg">
@@ -310,8 +428,10 @@ export function TimetableClient({
           classIds={classes.map((c) => c.id)}
           classNames={classNames}
           periodCount={periodCount}
-          viewMode="by-class"
-          filterClassId={selectedClassId ?? undefined}
+          viewMode={viewDimension}
+          filterClassId={viewDimension === "by-class" ? selectedClassId ?? undefined : undefined}
+          filterTeacherId={viewDimension === "by-teacher" ? selectedTeacherId ?? undefined : undefined}
+          filterRoomId={viewDimension === "by-room" ? selectedRoomId ?? undefined : undefined}
           substitutionOverlays={actualView ? overlays : []}
           teachers={teachers}
           subjects={subjects}
